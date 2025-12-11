@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="birthday_special"
+        android:label="Birthday Surprise"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
