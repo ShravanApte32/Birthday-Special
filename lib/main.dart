@@ -24,7 +24,7 @@ final DateTime togetherSince = DateTime(2024, 8, 24); // CHANGE THIS
 
 // Set to true while testing: unlocks 10 seconds after the lock screen opens
 // and ignores the saved "already unlocked" flag.
-const bool debugQuickUnlock = true;
+const bool debugQuickUnlock = false;
 
 class OpenWhen {
   final String title, body;
