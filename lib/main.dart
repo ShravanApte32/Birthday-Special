@@ -1,1745 +1,916 @@
-// lib/main.dart — Sparkling Birthday Surprise App
-// Enhanced with animations and visual appeal:
-// - Added shimmer effects, floating animations, and scale transitions
-// - Improved visual feedback with bouncy animations
-// - Added particle effects and glowing elements
-// - Enhanced micro-interactions while maintaining all original logic
-
 import 'dart:async';
-import 'dart:convert';
-import 'package:flutter/material.dart';
+import 'dart:math';
+import 'dart:ui' show FontFeature;
+
 import 'package:confetti/confetti.dart';
-import 'package:lottie/lottie.dart';
-import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:noise_meter/noise_meter.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-void main() => runApp(BirthdayApp());
+// ============================================================
+// CONFIG: edit these
+// ============================================================
+const herName = 'Rishuuu💕';
+const fromName = 'Daddy❤️';
+
+// Unlock moment (device local time). 12:00 am on 26 Nov 2026.
+final DateTime unlockTime = DateTime(2026, 11, 26, 0, 0);
+
+// Set to true while testing: unlocks 10 seconds after the lock screen opens
+// and ignores the saved "already unlocked" flag.
+const bool debugQuickUnlock = false;
+
+const voiceNoteAsset = 'assets/audio/birthday_greetings.mp3';
+
+// Birthday song: starts when the lock opens, loops until the candles are out.
+// If your file has a different name or extension, change it here AND in
+// pubspec.yaml.
+const birthdaySongAsset = 'assets/audio/birthday_song.mp3';
+
+// 0.0 to 1.0. Keep it modest: the mic can hear the song, so a loud song can
+// put the candles out by itself.
+const double songVolume = 0.1;
+
+// Blow detection: a mic reading at or above this loudness (dB) puts out one
+// candle. Blowing into the mic is usually 85+ dB, normal talking is lower.
+// Raise it if talking puts them out, lower it if blowing does nothing.
+const double blowThresholdDb = 78;
+
+// true = shows the live mic dB reading under the cake so you can tune the
+// threshold. Set back to false for the real build.
+const bool showMicDebug = false;
+
+const wishes = <String>[
+  'Happy 18th birthday! You are officially an adult, but you will always be my favourite kid at heart.',
+  'Every day with you feels like a gift. Today I get to celebrate the best one.',
+  'I hope this year brings you everything you have been dreaming of, and more.',
+  'No matter how far apart we are, you are always right here with me.',
+  'Make a wish, my love. I will do everything I can to make it come true.',
+];
+
+// ============================================================
+// THEME
+// ============================================================
+const kBgTop = Color(0xFF120A2A);
+const kBgMid = Color(0xFF2A1250);
+const kBgBottom = Color(0xFF5A2468);
+const kPink = Color(0xFFFF8FB1);
+const kRose = Color(0xFFE56B9A);
+const kGold = Color(0xFFFFD27D);
+const kLilac = Color(0xFFB69CFF);
+
+TextStyle script(double size, {Color color = Colors.white}) => TextStyle(
+      fontFamily: 'Pacifico',
+      fontSize: size,
+      color: color,
+      height: 1.25,
+    );
+
+const _months = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
+Path heartPath(Offset c, double s) {
+  final p = Path()..moveTo(c.dx, c.dy + s);
+  p.cubicTo(c.dx - 1.4 * s, c.dy - 0.1 * s, c.dx - 0.6 * s, c.dy - 1.1 * s,
+      c.dx, c.dy - 0.4 * s);
+  p.cubicTo(c.dx + 0.6 * s, c.dy - 1.1 * s, c.dx + 1.4 * s, c.dy - 0.1 * s,
+      c.dx, c.dy + s);
+  p.close();
+  return p;
+}
+
+// ============================================================
+// BIRTHDAY SONG (one shared player: lock screen starts it, home stops it)
+// ============================================================
+class BirthdayMusic {
+  static final AudioPlayer _p = AudioPlayer();
+  static Future<void>? _loading;
+  static bool _stopped = false;
+
+  static Future<void> _load() => _loading ??= () async {
+        await _p.setAsset(birthdaySongAsset);
+        await _p.setLoopMode(LoopMode.one);
+      }();
+
+  /// Safe to call many times: does nothing if already playing or finished.
+  static Future<void> start() async {
+    if (_stopped) return;
+    try {
+      await _load();
+      if (_stopped) return;
+      await _p.setVolume(songVolume);
+      if (!_p.playing) _p.play(); // not awaited: completes when playback ends
+    } catch (_) {
+      // missing file or audio error: the app just carries on silently
+    }
+  }
+
+  static Future<void> pause() async {
+    try {
+      await _p.pause();
+    } catch (_) {}
+  }
+
+  static Future<void> fadeOutAndStop() async {
+    if (_stopped) return;
+    _stopped = true;
+    try {
+      for (var i = 9; i >= 0; i--) {
+        await _p.setVolume(songVolume * i / 10);
+        await Future.delayed(const Duration(milliseconds: 150));
+      }
+      await _p.stop();
+    } catch (_) {}
+  }
+}
+
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.light);
+  runApp(const BirthdayApp());
+}
 
 class BirthdayApp extends StatelessWidget {
+  const BirthdayApp({super.key});
+
   @override
   Widget build(BuildContext context) {
-    final primary = Color(0xFFFF6B9A);
-    final accent = Color(0xFFFFC1E3);
-
     return MaterialApp(
-      title: 'A Birthday for Her',
+      title: 'Happy Birthday',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
+        brightness: Brightness.dark,
+        useMaterial3: true,
+        fontFamily: 'Poppins',
         colorScheme: ColorScheme.fromSeed(
-          seedColor: primary,
-          primary: primary,
-          secondary: accent,
-        ),
-        scaffoldBackgroundColor: Color(0xFFFFFBFD),
-        fontFamily: 'Montserrat',
-        appBarTheme: AppBarTheme(
-          backgroundColor: primary,
-          foregroundColor: Colors.white,
-          elevation: 6,
-          titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primary,
-            foregroundColor: Colors.white,
-            padding: EdgeInsets.symmetric(vertical: 12, horizontal: 18),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(foregroundColor: primary),
-        ),
-        cardTheme: CardThemeData(
-          // ← Correct: CardThemeData
-          elevation: 4,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          seedColor: kPink,
+          brightness: Brightness.dark,
         ),
       ),
-      home: MainPage(),
+      home: const SplashScreen(),
     );
   }
 }
 
-class MainPage extends StatefulWidget {
+// ============================================================
+// BACK BUTTON: never drops her out of the app by accident.
+// confirmExit false = back does nothing (splash).
+// confirmExit true  = press back twice within 2 seconds to leave.
+// ============================================================
+class GuardedScaffold extends StatefulWidget {
+  final Widget body;
+  final bool confirmExit;
+  const GuardedScaffold({
+    super.key,
+    required this.body,
+    this.confirmExit = true,
+  });
+
   @override
-  State<MainPage> createState() => _MainPageState();
+  State<GuardedScaffold> createState() => _GuardedScaffoldState();
 }
 
-class _MainPageState extends State<MainPage>
-    with SingleTickerProviderStateMixin {
-  // CONFIG
-  final DateTime unlockAt = DateTime(2025, 11, 26, 0, 0);
-  final String spotifyUrl = 'https://open.spotify.com/';
+class _GuardedScaffoldState extends State<GuardedScaffold> {
+  DateTime? _lastBack;
 
-  // STATE
-  bool unlocked = false;
-  Duration remaining = Duration.zero;
-  Timer? _clock;
+  void _onBack() {
+    if (!widget.confirmExit) return;
+    final now = DateTime.now();
+    if (_lastBack != null &&
+        now.difference(_lastBack!) < const Duration(seconds: 2)) {
+      BirthdayMusic.pause();
+      SystemNavigator.pop();
+      return;
+    }
+    _lastBack = now;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: const Text(
+          'Press back again to exit',
+          textAlign: TextAlign.center,
+        ),
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color.fromARGB(255, 183, 138, 255),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+    );
+  }
 
-  final AudioPlayer _messageAudio =
-      AudioPlayer(); // Separate audio player for message
-  bool messagePlaying = false;
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _onBack();
+      },
+      child: Scaffold(body: widget.body),
+    );
+  }
+}
 
-  // Animations
-  late ConfettiController _confetti;
-  late AnimationController _sparkleController;
-  late Animation<double> _sparkleAnimation;
-  final AudioPlayer _audio = AudioPlayer();
-  bool musicPlaying = false;
+Route<T> fadeRoute<T>(Widget page) => PageRouteBuilder<T>(
+      transitionDuration: const Duration(milliseconds: 900),
+      pageBuilder: (_, __, ___) => page,
+      transitionsBuilder: (_, anim, __, child) =>
+          FadeTransition(opacity: anim, child: child),
+    );
 
-  // Content
-  final List<String> letters = [
-    "You turn ordinary nights into something I wait for — your laugh, your words, your presence.",
-    "Late-night talks with you are my favourite place to be.",
-    "You are patient, loyal and softer than the moonlight — I love that about you.",
-    "I promise to travel every small road by your side, even from afar.",
-    "Every plan I make has one wish at the center: more time with you.",
-    "You make an ordinary day feel like a celebration.",
-    "When we meet, I'll hold you and never let go — that's my promise.",
-  ];
+// ============================================================
+// SHARED: reveal animation + ambient animated background
+// ============================================================
+class Reveal extends StatefulWidget {
+  final Widget child;
+  final Duration delay;
+  final double slide;
+  const Reveal({
+    super.key,
+    required this.child,
+    this.delay = Duration.zero,
+    this.slide = 0.15,
+  });
 
-  // Promise wall
-  List<Map<String, dynamic>> promises = [
-    {"text": "Communicate openly, even on tough days", "done": false},
-    {
-      "text": "Plan our first trip together and make it unforgettable",
-      "done": false,
-    },
-    {
-      "text": "Never sleep angry — always solve things with love",
-      "done": false,
-    },
-    {"text": "Support each other’s dreams without hesitation", "done": false},
-    {"text": "Make time for us, no matter how busy life gets", "done": false},
-    {"text": "Celebrate small wins and milestones together", "done": false},
-    {"text": "Be patient with distance and trust the journey", "done": false},
-    {
-      "text": "Create memories that we’ll laugh about years later",
-      "done": false,
-    },
-    {"text": "Keep growing individually and together", "done": false},
-  ];
+  @override
+  State<Reveal> createState() => _RevealState();
+}
 
-  // Wish bubbles
-  final TextEditingController wishController = TextEditingController();
-  final List<_FloatingWish> floatingWishes = [];
-
-  // Planner
-  final TextEditingController planTitle = TextEditingController();
-  final TextEditingController planDate = TextEditingController();
-  List<Map<String, dynamic>> plans = [];
+class _RevealState extends State<Reveal> {
+  bool _show = false;
 
   @override
   void initState() {
     super.initState();
-    _confetti = ConfettiController(duration: Duration(seconds: 3));
-    _sparkleController = AnimationController(
-      vsync: this,
-      duration: Duration(seconds: 2),
-    )..repeat(reverse: true);
-    _sparkleAnimation = CurvedAnimation(
-      parent: _sparkleController,
-      curve: Curves.easeInOut,
+    Future.delayed(widget.delay, () {
+      if (mounted) setState(() => _show = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      opacity: _show ? 1 : 0,
+      duration: const Duration(milliseconds: 900),
+      curve: Curves.easeOut,
+      child: AnimatedSlide(
+        offset: _show ? Offset.zero : Offset(0, widget.slide),
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.easeOutCubic,
+        child: widget.child,
+      ),
     );
-    _startClock();
-    _loadState();
   }
+}
 
-  // ------------------- CLOCK / UNLOCK -------------------
-  void _startClock() {
-    _updateRemaining();
-    _clock?.cancel();
-    _clock = Timer.periodic(Duration(seconds: 1), (_) => _updateRemaining());
-  }
+class _Particle {
+  final double x, y, size, phase;
+  final int speed, twinkle;
+  final bool heart;
+  _Particle(this.x, this.y, this.size, this.phase, this.speed, this.twinkle,
+      this.heart);
+}
 
-  void _updateRemaining() {
-    final now = DateTime.now();
-    final rem = unlockAt.difference(now);
-    if (!mounted) return;
-    setState(() {
-      if (rem.isNegative || rem == Duration.zero) {
-        remaining = Duration.zero;
-        if (!unlocked) _onUnlocked();
-      } else {
-        remaining = rem;
-      }
+class AmbientBg extends StatefulWidget {
+  final Widget child;
+  final bool
+      rising; // true: hearts and sparkles float up. false: twinkling stars.
+  final int count;
+  const AmbientBg({
+    super.key,
+    required this.child,
+    this.rising = false,
+    this.count = 60,
+  });
+
+  @override
+  State<AmbientBg> createState() => _AmbientBgState();
+}
+
+class _AmbientBgState extends State<AmbientBg>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 40),
+  )..repeat();
+  late final List<_Particle> _ps;
+
+  @override
+  void initState() {
+    super.initState();
+    final r = Random(7);
+    _ps = List.generate(widget.count, (_) {
+      return _Particle(
+        r.nextDouble(),
+        r.nextDouble(),
+        widget.rising ? 2 + r.nextDouble() * 6 : 0.8 + r.nextDouble() * 1.8,
+        r.nextDouble(),
+        1 + r.nextInt(3),
+        2 + r.nextInt(5),
+        widget.rising && r.nextDouble() < 0.45,
+      );
     });
-  }
-
-  void _onUnlocked() {
-    setState(() {
-      unlocked = true;
-    });
-    _confetti.play();
-    _saveUnlocked(true);
-  }
-
-  // ------------------- AUDIO -------------------
-
-  Future<void> _stopMusic() async {
-    try {
-      await _audio.stop();
-    } catch (e) {
-      print('stop audio error: $e');
-    }
-    setState(() => musicPlaying = false);
-  }
-
-  // ------------------- PERSISTENCE -------------------
-  Future<void> _loadState() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      unlocked = prefs.getBool('unlocked') ?? unlocked;
-      final p = prefs.getString('promises');
-      if (p != null) {
-        try {
-          final list = jsonDecode(p) as List;
-          promises = list.map((e) => Map<String, dynamic>.from(e)).toList();
-        } catch (e) {
-          print('promises load error: $e');
-        }
-      }
-
-      final plansJson = prefs.getString('plans');
-      if (plansJson != null) {
-        try {
-          final list = jsonDecode(plansJson) as List;
-          plans = list.map((e) => Map<String, dynamic>.from(e)).toList();
-        } catch (e) {
-          print('plans load error: $e');
-        }
-      }
-    });
-  }
-
-  Future<void> _saveUnlocked(bool v) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('unlocked', v);
-  }
-
-  Future<void> _savePromises() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('promises', jsonEncode(promises));
-  }
-
-  // ------------------- UTIL -------------------
-  String _formatDuration(Duration d) {
-    if (d.inDays > 0)
-      return '${d.inDays}d ${d.inHours % 24}h ${d.inMinutes % 60}m ${d.inSeconds % 60}s';
-    return '${d.inHours.toString().padLeft(2, '0')}:${(d.inMinutes % 60).toString().padLeft(2, '0')}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
   }
 
   @override
   void dispose() {
-    _clock?.cancel();
-    _confetti.dispose();
-    _sparkleController.dispose();
-    _audio.dispose();
-    _messageAudio.dispose(); // ADD THIS LINE
-    wishController.dispose();
-    planTitle.dispose();
-    planDate.dispose();
+    _c.dispose();
     super.dispose();
   }
 
-  // ------------------- BUILD -------------------
   @override
   Widget build(BuildContext context) {
-    final w = MediaQuery.of(context).size.width;
-    return Scaffold(
-      appBar: AppBar(
-        title: Center(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.celebration, color: Colors.yellow),
-              SizedBox(width: 8),
-              Text('A Birthday Surprise'),
-              SizedBox(width: 8),
-              Icon(Icons.favorite, color: Colors.red),
-            ],
-          ),
-        ),
-      ),
-      body: Stack(
-        children: [
-          // Background sparkles
-          Positioned.fill(
-            child: AnimatedBuilder(
-              animation: _sparkleAnimation,
-              builder: (context, child) {
-                return CustomPaint(
-                  painter: _SparklePainter(_sparkleAnimation.value),
-                );
-              },
-            ),
-          ),
-
-          SingleChildScrollView(
-            padding: EdgeInsets.symmetric(horizontal: 18, vertical: 22),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                unlocked ? _buildUnlockedHeader() : _buildLockedHeader(),
-                SizedBox(height: 24),
-                _buildGiftCard(),
-                SizedBox(height: 16),
-                _buildSpecialMessageCard(),
-                SizedBox(height: 16),
-                _buildLettersCard(),
-                SizedBox(height: 16),
-                _buildActionButtons(),
-                SizedBox(height: 16),
-                Text(
-                  'From Your Love, Hubby and Your\'s truly always — Daddy ❤️',
-                  style: TextStyle(
-                    color: Colors.grey[700],
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-                SizedBox(height: 10),
-              ],
-            ),
-          ),
-
-          // confetti overlay
-          Align(
-            alignment: Alignment.topCenter,
-            child: ConfettiWidget(
-              confettiController: _confetti,
-              blastDirectionality: BlastDirectionality.explosive,
-              shouldLoop: false,
-              colors: [
-                Color(0xFFFF6B9A),
-                Color(0xFFB76BA3),
-                Color(0xFFFFD1EA),
-                Colors.yellow,
-                Colors.white,
-              ],
-              numberOfParticles: 30,
-            ),
-          ),
-
-          // floating wishes
-          ...floatingWishes.asMap().entries.map((e) {
-            final idx = e.key;
-            final wleft = 18.0 + (idx % 3) * (w * 0.28);
-            return Positioned(
-              left: wleft,
-              bottom: 18 + idx * 28.0,
-              child: _FloatingBubble(text: e.value.text),
-            );
-          }).toList(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLockedHeader() {
-    return Column(
+    return Stack(
+      fit: StackFit.expand,
       children: [
-        SizedBox(height: 20),
-        AnimatedContainer(
-          duration: Duration(milliseconds: 500),
-          width: 180,
-          height: 180,
+        const DecoratedBox(
           decoration: BoxDecoration(
-            gradient: RadialGradient(
-              colors: [Colors.pink[100]!, Colors.pink[300]!],
-              stops: [0.3, 1.0],
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [kBgTop, kBgMid, kBgBottom],
             ),
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.pink.withOpacity(0.4),
-                blurRadius: 15,
-                spreadRadius: 2,
-              ),
-            ],
           ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Icon(Icons.lock, size: 80, color: Colors.white),
-              Positioned(
-                right: 20,
-                top: 20,
-                child: ScaleTransition(
-                  scale: _sparkleAnimation,
-                  child: Icon(Icons.star, size: 24, color: Colors.yellow),
+        ),
+        Positioned.fill(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: const Alignment(0, -0.5),
+                radius: 0.9,
+                colors: [kPink.withOpacity(0.16), Colors.transparent],
+              ),
+            ),
+          ),
+        ),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: RepaintBoundary(
+              child: AnimatedBuilder(
+                animation: _c,
+                builder: (_, __) => CustomPaint(
+                  painter: _ParticlePainter(_ps, _c.value, widget.rising),
                 ),
               ),
-            ],
-          ),
-        ),
-        SizedBox(height: 20),
-        AnimatedOpacity(
-          opacity: 1.0,
-          duration: Duration(milliseconds: 500),
-          child: Text(
-            'A surprise for you',
-            style: TextStyle(
-              fontSize: 20,
-              color: Colors.pink[700],
-              fontWeight: FontWeight.w500,
             ),
           ),
         ),
-        SizedBox(height: 8),
-        Text(
-          'Unlocks at midnight',
-          style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-        ),
-        SizedBox(height: 16),
-        BounceInCard(
-          child: Card(
-            elevation: 6,
-            child: Padding(
-              padding: EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  Text(
-                    _formatDuration(remaining),
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.pink[600],
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'until ${unlockAt.day} ${_monthName(unlockAt.month)} ${unlockAt.year}',
-                    style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+        widget.child,
       ],
     );
   }
-
-  Widget _buildUnlockedHeader() {
-    return Column(
-      children: [
-        SizedBox(height: 10),
-        BounceInAnimation(
-          child: Container(
-            width: 200,
-            height: 200,
-            child: LottieBuilder.asset(
-              'assets/lottie/birthday_balloons.json',
-              fit: BoxFit.contain,
-              repeat: true,
-              errorBuilder: (_, __, ___) => Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    colors: [Colors.pink[100]!, Colors.pink[300]!],
-                  ),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.cake, size: 60, color: Colors.white),
-              ),
-            ),
-          ),
-        ),
-        SizedBox(height: 16),
-        FadeInAnimation(
-          delay: 300,
-          child: Text(
-            'Happy Birthday! ❤️',
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: Colors.pink[700],
-            ),
-          ),
-        ),
-        SizedBox(height: 8),
-        FadeInAnimation(
-          delay: 500,
-          child: Text(
-            'Every moment with you is a gift',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 16,
-              color: Colors.grey[700],
-              fontStyle: FontStyle.italic,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSpecialMessageCard() {
-    return BounceInAnimation(
-      delay: 300,
-      child: Card(
-        elevation: 6,
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'My Special Message',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.purple[700],
-                    ),
-                  ),
-                  Icon(Icons.record_voice_over, color: Colors.purple[600]),
-                ],
-              ),
-              SizedBox(height: 16),
-              Text(
-                'A personal message from my heart to yours',
-                style: TextStyle(color: Colors.grey[600], fontSize: 14),
-              ),
-              SizedBox(height: 16),
-              GestureDetector(
-                onTap: unlocked ? _openMessagePlayer : null,
-                child: AnimatedContainer(
-                  duration: Duration(milliseconds: 300),
-                  height: 120,
-                  decoration: BoxDecoration(
-                    gradient: unlocked
-                        ? LinearGradient(
-                            colors: [Colors.purple[50]!, Colors.purple[100]!],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          )
-                        : LinearGradient(
-                            colors: [Colors.grey[100]!, Colors.grey[200]!],
-                          ),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: unlocked ? Colors.purple[200]! : Colors.grey[300]!,
-                      width: 2,
-                    ),
-                    boxShadow: unlocked
-                        ? [
-                            BoxShadow(
-                              color: Colors.purple.withOpacity(0.3),
-                              blurRadius: 10,
-                              spreadRadius: 2,
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Stack(
-                    children: [
-                      Center(
-                        child: unlocked
-                            ? Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  ScaleTransition(
-                                    scale: _sparkleAnimation,
-                                    child: Icon(
-                                      Icons.voice_chat,
-                                      size: 40,
-                                      color: Colors.purple[400],
-                                    ),
-                                  ),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    'Tap to hear my message',
-                                    style: TextStyle(
-                                      color: Colors.purple[600],
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.lock_outline,
-                                    size: 40,
-                                    color: Colors.grey[400],
-                                  ),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    'Unlocks on your birthday',
-                                    style: TextStyle(color: Colors.grey[600]),
-                                  ),
-                                ],
-                              ),
-                      ),
-                      if (unlocked && messagePlaying)
-                        Positioned(
-                          right: 10,
-                          top: 10,
-                          child: ScaleTransition(
-                            scale: _sparkleAnimation,
-                            child: Icon(
-                              Icons.volume_up,
-                              size: 16,
-                              color: Colors.purple[600],
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Add this method to open the message player
-  void _openMessagePlayer() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (c) => _MessagePlayerDialog(
-        onPlay: _playSpecialMessage,
-        onReplay: _replaySpecialMessage,
-        onStop: _stopSpecialMessage,
-      ),
-    );
-  }
-
-  void _stopSpecialMessage() async {
-    try {
-      await _messageAudio.stop();
-      setState(() => messagePlaying = false);
-    } catch (e) {
-      print('stop message error: $e');
-    }
-  }
-
-  void _playSpecialMessage() async {
-    try {
-      await _stopMusic(); // Stop song if playing
-      _stopSpecialMessage(); // Stop if already playing
-      await _messageAudio.play(AssetSource('audio/birthday_greetings.mp3'));
-      setState(() => messagePlaying = true);
-    } catch (e) {
-      print('message play error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error playing message'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  void _replaySpecialMessage() async {
-    try {
-      await _messageAudio.stop();
-      await _messageAudio.play(AssetSource('audio/birthday_greetings.mp3'));
-      setState(() => messagePlaying = true);
-    } catch (e) {
-      print('replay message error: $e');
-    }
-  }
-
-  Widget _buildGiftCard() {
-    return BounceInAnimation(
-      delay: 200,
-      child: Card(
-        elevation: 6,
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Your Special Gift',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.pink[700],
-                    ),
-                  ),
-                  ScaleTransition(
-                    scale: _sparkleAnimation,
-                    child: Icon(
-                      unlocked ? Icons.verified : Icons.lock,
-                      color: unlocked ? Colors.green : Colors.grey,
-                      size: 20,
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 16),
-              GestureDetector(
-                onTap: unlocked ? _openSongPlayer : null,
-                child: AnimatedContainer(
-                  duration: Duration(milliseconds: 300),
-                  height: 140,
-                  decoration: BoxDecoration(
-                    gradient: unlocked
-                        ? LinearGradient(
-                            colors: [Colors.pink[50]!, Colors.pink[100]!],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          )
-                        : LinearGradient(
-                            colors: [Colors.grey[100]!, Colors.grey[200]!],
-                          ),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: unlocked ? Colors.pink[200]! : Colors.grey[300]!,
-                      width: 2,
-                    ),
-                    boxShadow: unlocked
-                        ? [
-                            BoxShadow(
-                              color: Colors.pink.withOpacity(0.3),
-                              blurRadius: 10,
-                              spreadRadius: 2,
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Stack(
-                    children: [
-                      Center(
-                        child: unlocked
-                            ? Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  ScaleTransition(
-                                    scale: _sparkleAnimation,
-                                    child: Icon(
-                                      Icons.album,
-                                      size: 50,
-                                      color: Colors.pink[400],
-                                    ),
-                                  ),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    'A Song Just For You',
-                                    style: TextStyle(
-                                      color: Colors.pink[600],
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                  SizedBox(height: 4),
-                                  Text(
-                                    'Tap to listen to my heart',
-                                    style: TextStyle(
-                                      color: Colors.pink[500],
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.lock_outline,
-                                    size: 40,
-                                    color: Colors.grey[400],
-                                  ),
-                                  SizedBox(height: 8),
-                                  Text(
-                                    'Unlocks on your birthday',
-                                    style: TextStyle(color: Colors.grey[600]),
-                                  ),
-                                ],
-                              ),
-                      ),
-                      if (unlocked)
-                        Positioned(
-                          right: 10,
-                          top: 10,
-                          child: ScaleTransition(
-                            scale: _sparkleAnimation,
-                            child: Icon(
-                              Icons.star,
-                              size: 16,
-                              color: Colors.yellow,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _openSongPlayer() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (c) => _SongPlayerDialog(
-        onPlay: _playSpecialSong,
-        onReplay: _replaySpecialSong,
-        onStop: _stopSpecialSong,
-      ),
-    );
-  }
-
-  void _stopSpecialSong() async {
-    try {
-      await _audio.stop();
-    } catch (e) {
-      print('stop song error: $e');
-    }
-  }
-
-  void _playSpecialSong() async {
-    try {
-      await _stopMusic();
-      await _audio.play(AssetSource('audio/birthday_song.mp3'));
-    } catch (e) {
-      print('song play error: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error playing song'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  void _replaySpecialSong() async {
-    try {
-      await _audio.stop();
-      await _audio.play(AssetSource('audio/birthday_song.mp3'));
-    } catch (e) {
-      print('replay error: $e');
-    }
-  }
-
-  Widget _buildLettersCard() {
-    return BounceInAnimation(
-      delay: 400,
-      child: Card(
-        elevation: 6,
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(Icons.email, color: Colors.pink[700]),
-                  SizedBox(width: 8),
-                  Text(
-                    'Letters for You',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.pink[700],
-                    ),
-                  ),
-                ],
-              ),
-              SizedBox(height: 12),
-              Text(
-                'Tap each card to read my thoughts',
-                style: TextStyle(color: Colors.grey[600], fontSize: 14),
-              ),
-              SizedBox(height: 16),
-              // Fixed the mapping - using simple for loop instead of map().toList()
-              for (int i = 0; i < letters.length; i++)
-                Padding(
-                  padding: EdgeInsets.only(bottom: 12),
-                  child: _LetterWidget(text: letters[i], index: i),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActionButtons() {
-    return BounceInAnimation(
-      delay: 600,
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: [
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8),
-              child: _AnimatedButton(
-                onPressed: _randomReason,
-                icon: Icons.favorite_border,
-                label: 'Why I love you',
-              ),
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: 8),
-              child: _AnimatedButton(
-                onPressed: _openPromiseEditor,
-                icon: Icons.assignment,
-                label: 'Our promises',
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _randomReason() {
-    final r = [
-      'Your laugh is my favorite sound.',
-      'You see the good in everything and everyone.',
-      'Your kindness touches everyone around you.',
-      'You make me want to be a better person.',
-      'Your strength inspires me every day.',
-      'You understand me like no one else.',
-      'Your smile brightens even the darkest days.',
-    ];
-    final pick = r[DateTime.now().millisecondsSinceEpoch % r.length];
-    showDialog(
-      context: context,
-      builder: (c) => ScaleTransition(
-        scale: CurvedAnimation(
-          parent: ModalRoute.of(c)!.animation!,
-          curve: Curves.elasticOut,
-        ),
-        child: AlertDialog(
-          backgroundColor: Colors.pink[50],
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Row(
-            children: [
-              Icon(Icons.favorite, color: Colors.pink),
-              SizedBox(width: 8),
-              Text('Why I Love You'),
-            ],
-          ),
-          content: Text(pick),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c), child: Text('❤️')),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _openPromiseEditor() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (c) => _PromiseEditor(
-        promises: promises,
-        onChanged: (newList) {
-          setState(() => promises = newList);
-          _savePromises();
-        },
-      ),
-    );
-  }
-
-  String _monthName(int m) {
-    const names = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    return names[m - 1];
-  }
 }
 
-// ------------------- ANIMATED SUB WIDGETS -------------------
-class _LetterWidget extends StatefulWidget {
-  final String text;
-  final int index;
-  const _LetterWidget({Key? key, required this.text, required this.index})
-    : super(key: key);
-  @override
-  State<_LetterWidget> createState() => _LetterWidgetState();
-}
-
-class _LetterWidgetState extends State<_LetterWidget> {
-  bool open = false;
+class _ParticlePainter extends CustomPainter {
+  final List<_Particle> ps;
+  final double t;
+  final bool rising;
+  _ParticlePainter(this.ps, this.t, this.rising);
 
   @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: Duration(milliseconds: 300),
-      decoration: BoxDecoration(
-        color: open ? Colors.pink[50] : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: open ? Colors.pink[200]! : Colors.grey[200]!,
-          width: 1.5,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      padding: EdgeInsets.all(16),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => setState(() => open = !open),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: open ? Colors.pink[100] : Colors.grey[100],
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                open ? Icons.favorite : Icons.email,
-                color: open ? Colors.pink[600] : Colors.grey[600],
-                size: 20,
-              ),
-            ),
-            SizedBox(width: 16),
-            Expanded(
-              child: AnimatedCrossFade(
-                firstChild: Text(
-                  'Tap to open',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w500,
-                    color: Colors.grey[700],
-                  ),
-                ),
-                secondChild: Text(
-                  widget.text, // This should display the letter text
-                  style: TextStyle(height: 1.4, color: Colors.grey[800]),
-                ),
-                crossFadeState: open
-                    ? CrossFadeState.showSecond
-                    : CrossFadeState.showFirst,
-                duration: Duration(milliseconds: 200),
-              ),
-            ),
-            Icon(
-              open ? Icons.expand_less : Icons.expand_more,
-              color: Colors.grey[500],
-            ),
-          ],
-        ),
-      ),
-    );
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint();
+    for (final p in ps) {
+      final tw = 0.5 + 0.5 * sin(2 * pi * (t * p.twinkle + p.phase));
+      double y = p.y;
+      double dx = 0;
+      if (rising) {
+        y = (p.y - t * p.speed) % 1.0;
+        dx = sin(2 * pi * (t * p.speed + p.phase)) * 14;
+      }
+      final pos = Offset(p.x * size.width + dx, y * size.height);
+      if (rising) {
+        // fade near top and bottom so particles don't pop
+        final edge = min(y, 1 - y).clamp(0.0, 0.12).toDouble() / 0.12;
+        final op = (0.12 + 0.3 * tw) * edge;
+        paint.color = (p.heart ? kPink : Colors.white).withOpacity(op);
+        if (p.heart) {
+          canvas.drawPath(heartPath(pos, p.size), paint);
+        } else {
+          canvas.drawCircle(pos, p.size * 0.5, paint);
+        }
+      } else {
+        paint.color = Colors.white.withOpacity(0.08 + 0.2 * tw);
+        canvas.drawCircle(pos, p.size * 2.6, paint);
+        paint.color = Colors.white.withOpacity(0.25 + 0.75 * tw);
+        canvas.drawCircle(pos, p.size, paint);
+      }
+    }
   }
-}
 
-class _PromiseEditor extends StatefulWidget {
-  final List<Map<String, dynamic>> promises;
-  final ValueChanged<List<Map<String, dynamic>>> onChanged;
-  const _PromiseEditor({
-    Key? key,
-    required this.promises,
-    required this.onChanged,
-  }) : super(key: key);
   @override
-  State<_PromiseEditor> createState() => _PromiseEditorState();
+  bool shouldRepaint(_ParticlePainter old) => old.t != t;
 }
 
-class _PromiseEditorState extends State<_PromiseEditor> {
-  late List<Map<String, dynamic>> list;
-  final TextEditingController ctrl = TextEditingController();
+BoxDecoration glass({double radius = 24}) => BoxDecoration(
+      color: Colors.white.withOpacity(0.07),
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: Colors.white.withOpacity(0.14)),
+    );
+
+// ============================================================
+// 1. SPLASH
+// ============================================================
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen>
+    with TickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2600),
+  )..forward();
+  late final AnimationController _beat = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat(reverse: true);
+
+  late final Animation<double> _heart = CurvedAnimation(
+    parent: _c,
+    curve: const Interval(0.0, 0.5, curve: Curves.elasticOut),
+  );
+  late final Animation<double> _beatScale = Tween(begin: 1.0, end: 1.12)
+      .animate(CurvedAnimation(parent: _beat, curve: Curves.easeInOut));
+  late final Animation<double> _t1 = CurvedAnimation(
+    parent: _c,
+    curve: const Interval(0.45, 0.75, curve: Curves.easeOut),
+  );
+  late final Animation<double> _t2 = CurvedAnimation(
+    parent: _c,
+    curve: const Interval(0.65, 1.0, curve: Curves.easeOut),
+  );
+  late final Animation<Offset> _s1 =
+      Tween(begin: const Offset(0, 0.4), end: Offset.zero).animate(_t1);
+  late final Animation<Offset> _s2 =
+      Tween(begin: const Offset(0, 0.6), end: Offset.zero).animate(_t2);
 
   @override
   void initState() {
     super.initState();
-    list = List.from(widget.promises);
+    _route();
+  }
+
+  Future<void> _route() async {
+    final prefs = await SharedPreferences.getInstance();
+    final unlocked = !debugQuickUnlock && (prefs.getBool('unlocked') ?? false);
+    await Future.delayed(const Duration(milliseconds: 3200));
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      fadeRoute(unlocked ? const HomeScreen() : const LockScreen()),
+    );
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    _beat.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // limit the height so the bottom sheet doesn't take full screen and allows scrolling
-    final maxHeight = MediaQuery.of(context).size.height * 0.75;
-
-    return SizedBox(
-      height: maxHeight,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(20),
-            topRight: Radius.circular(20),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 20,
-              spreadRadius: 5,
-            ),
-          ],
-        ),
-        padding: EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.max,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Our Promises',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.pink[700],
+    return GuardedScaffold(
+      confirmExit: false,
+      body: AmbientBg(
+        rising: false,
+        count: 60,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 240,
+                height: 240,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: RadialGradient(
+                          colors: [
+                            kPink.withOpacity(0.4),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                    ),
+                    ScaleTransition(
+                      scale: _heart,
+                      child: ScaleTransition(
+                        scale: _beatScale,
+                        child: const Icon(
+                          Icons.favorite,
+                          size: 100,
+                          color: kPink,
+                          shadows: [Shadow(color: kPink, blurRadius: 36)],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              FadeTransition(
+                opacity: _t1,
+                child: SlideTransition(
+                  position: _s1,
+                  child: Text('Something special',
+                      style: script(30, color: kGold)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              FadeTransition(
+                opacity: _t2,
+                child: SlideTransition(
+                  position: _s2,
+                  child: const Text(
+                    'IS WAITING FOR YOU',
+                    style: TextStyle(
+                      fontSize: 13,
+                      letterSpacing: 5,
+                      color: Colors.white70,
+                      fontWeight: FontWeight.w300,
+                    ),
                   ),
                 ),
-                IconButton(
-                  icon: Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-            SizedBox(height: 16),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-            // ---------- SCROLLABLE AREA ----------
-            Expanded(
-              child: list.isEmpty
-                  ? SingleChildScrollView(
-                      physics: BouncingScrollPhysics(),
-                      child: ScaleTransition(
-                        scale: CurvedAnimation(
-                          parent: ModalRoute.of(context)!.animation!,
-                          curve: Curves.elasticOut,
-                        ),
-                        child: Container(
-                          padding: EdgeInsets.all(20),
-                          child: Column(
+// ============================================================
+// 2. LOCK SCREEN
+// ============================================================
+class LockScreen extends StatefulWidget {
+  const LockScreen({super.key});
+
+  @override
+  State<LockScreen> createState() => _LockScreenState();
+}
+
+class _LockScreenState extends State<LockScreen> with TickerProviderStateMixin {
+  late final DateTime _target = debugQuickUnlock
+      ? DateTime.now().add(const Duration(seconds: 10))
+      : unlockTime;
+  Timer? _timer;
+  late Duration _remaining = _target.difference(DateTime.now());
+  bool _unlocking = false;
+
+  late final AnimationController _ripple = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 3),
+  )..repeat();
+  late final AnimationController _shake = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 500),
+  );
+  late final AnimationController _burst = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1600),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (_remaining.inSeconds <= 0) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _unlock());
+    } else {
+      _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+        final r = _target.difference(DateTime.now());
+        if (r.inSeconds <= 0) {
+          _timer?.cancel();
+          _unlock();
+        } else {
+          setState(() => _remaining = r);
+        }
+      });
+    }
+  }
+
+  Future<void> _unlock() async {
+    if (_unlocking || !mounted) return;
+    HapticFeedback.heavyImpact();
+    setState(() {
+      _unlocking = true;
+      _remaining = Duration.zero;
+    });
+    _burst.forward();
+    BirthdayMusic.start();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('unlocked', true);
+    await Future.delayed(const Duration(milliseconds: 2000));
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(fadeRoute(const HomeScreen()));
+  }
+
+  void _shakeLock() {
+    if (_unlocking) return;
+    HapticFeedback.mediumImpact();
+    _shake.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _ripple.dispose();
+    _shake.dispose();
+    _burst.dispose();
+    super.dispose();
+  }
+
+  String _two(int n) => n.toString().padLeft(2, '0');
+
+  @override
+  Widget build(BuildContext context) {
+    final d = _remaining.inDays;
+    final h = _remaining.inHours % 24;
+    final m = _remaining.inMinutes % 60;
+    final s = _remaining.inSeconds % 60;
+    final accent = _unlocking ? kGold : kPink;
+    final dateLabel =
+        '${unlockTime.day} ${_months[unlockTime.month - 1]} ${unlockTime.year}  ·  12:00 AM';
+
+    return GuardedScaffold(
+      body: Stack(
+        children: [
+          AmbientBg(
+            rising: false,
+            count: 90,
+            child: SafeArea(
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: _shakeLock,
+                      child: AnimatedBuilder(
+                        animation: _shake,
+                        builder: (_, child) {
+                          final dx = sin(_shake.value * pi * 7) *
+                              14 *
+                              (1 - _shake.value);
+                          return Transform.translate(
+                            offset: Offset(dx, 0),
+                            child: child,
+                          );
+                        },
+                        child: SizedBox(
+                          width: 300,
+                          height: 300,
+                          child: Stack(
+                            alignment: Alignment.center,
                             children: [
-                              Icon(
-                                Icons.assignment,
-                                size: 40,
-                                color: Colors.grey[400],
+                              AnimatedBuilder(
+                                animation: _ripple,
+                                builder: (_, __) => CustomPaint(
+                                  size: const Size(300, 300),
+                                  painter:
+                                      _RipplePainter(_ripple.value, accent),
+                                ),
                               ),
-                              SizedBox(height: 8),
-                              Text(
-                                'No promises yet',
-                                style: TextStyle(color: Colors.grey[600]),
+                              AnimatedContainer(
+                                duration: const Duration(milliseconds: 600),
+                                width: 132,
+                                height: 132,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                    colors: [
+                                      Colors.white.withOpacity(0.16),
+                                      Colors.white.withOpacity(0.04),
+                                    ],
+                                  ),
+                                  border: Border.all(
+                                    color: accent.withOpacity(0.55),
+                                    width: 1.5,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: accent.withOpacity(0.38),
+                                      blurRadius: 44,
+                                      spreadRadius: 4,
+                                    ),
+                                  ],
+                                ),
                               ),
-                              Text(
-                                'Add our first promise to each other',
-                                style: TextStyle(
-                                  color: Colors.grey[500],
-                                  fontSize: 12,
+                              AnimatedSwitcher(
+                                duration: const Duration(milliseconds: 800),
+                                switchInCurve: Curves.elasticOut,
+                                transitionBuilder: (child, anim) =>
+                                    ScaleTransition(scale: anim, child: child),
+                                child: Icon(
+                                  _unlocking
+                                      ? Icons.lock_open_rounded
+                                      : Icons.lock_rounded,
+                                  key: ValueKey(_unlocking),
+                                  size: 64,
+                                  color: _unlocking ? kGold : Colors.white,
+                                  shadows: [
+                                    Shadow(color: accent, blurRadius: 24),
+                                  ],
                                 ),
                               ),
                             ],
                           ),
                         ),
                       ),
-                    )
-                  : ListView.builder(
-                      padding: EdgeInsets.only(bottom: 8),
-                      itemCount: list.length,
-                      itemBuilder: (context, idx) {
-                        final item = list[idx];
-                        return SlideInAnimation(
-                          delay: idx * 100,
-                          child: Container(
-                            margin: EdgeInsets.only(bottom: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.grey[200]!),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 4,
-                                ),
-                              ],
-                            ),
-                            child: CheckboxListTile(
-                              value: item['done'] ?? false,
-                              onChanged: (v) {
-                                setState(() => list[idx]['done'] = v);
-                                widget.onChanged(list);
-                              },
-                              title: Text(
-                                item['text'] ?? '',
-                                style: TextStyle(
-                                  decoration: (item['done'] ?? false)
-                                      ? TextDecoration.lineThrough
-                                      : null,
-                                  color: (item['done'] ?? false)
-                                      ? Colors.grey[500]
-                                      : Colors.black87,
-                                ),
-                              ),
-                              controlAffinity: ListTileControlAffinity.leading,
-                              activeColor: Colors.pink[400],
-                              checkColor: Colors.white,
+                    ),
+                    const SizedBox(height: 4),
+                    Reveal(
+                      delay: const Duration(milliseconds: 200),
+                      child: Column(
+                        children: [
+                          AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 500),
+                            child: Text(
+                              _unlocking ? "It's time!" : 'Not just yet...',
+                              key: ValueKey(_unlocking),
+                              style: script(32, color: kGold),
                             ),
                           ),
-                        );
-                      },
+                          const SizedBox(height: 6),
+                          Text(
+                            _unlocking
+                                ? 'OPENING YOUR SURPRISE'
+                                : 'YOUR SURPRISE UNLOCKS AT MIDNIGHT',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              letterSpacing: 3,
+                              color: Colors.white60,
+                              fontWeight: FontWeight.w300,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                    const SizedBox(height: 36),
+                    AnimatedOpacity(
+                      opacity: _unlocking ? 0 : 1,
+                      duration: const Duration(milliseconds: 500),
+                      child: Reveal(
+                        delay: const Duration(milliseconds: 500),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (d > 0) _TimeBox(value: _two(d), label: 'DAYS'),
+                            _TimeBox(value: _two(h), label: 'HOURS'),
+                            _TimeBox(value: _two(m), label: 'MINS'),
+                            _TimeBox(value: _two(s), label: 'SECS'),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    AnimatedOpacity(
+                      opacity: _unlocking ? 0 : 1,
+                      duration: const Duration(milliseconds: 500),
+                      child: Reveal(
+                        delay: const Duration(milliseconds: 800),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 18, vertical: 9),
+                          decoration: glass(radius: 30),
+                          child: Text(
+                            dateLabel,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.white70,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-
-            // ---------- END SCROLLABLE AREA ----------
-            // SizedBox(height: 12),
-            // Row(
-            //   children: [
-            //     Expanded(
-            //       child: TextField(
-            //         controller: ctrl,
-            //         decoration: InputDecoration(
-            //           hintText: 'Add a new promise...',
-            //           border: OutlineInputBorder(
-            //             borderRadius: BorderRadius.circular(8),
-            //           ),
-            //           contentPadding: EdgeInsets.symmetric(
-            //             horizontal: 16,
-            //             vertical: 12,
-            //           ),
-            //         ),
-            //       ),
-            //     ),
-            //     SizedBox(width: 12),
-            //     ScaleTransition(
-            //       scale: CurvedAnimation(
-            //         parent: ModalRoute.of(context)!.animation!,
-            //         curve: Curves.elasticOut,
-            //       ),
-            //       child: Container(
-            //         decoration: BoxDecoration(
-            //           gradient: LinearGradient(
-            //             colors: [Colors.pink[400]!, Colors.pink[600]!],
-            //           ),
-            //           borderRadius: BorderRadius.circular(8),
-            //           boxShadow: [
-            //             BoxShadow(
-            //               color: Colors.pink.withOpacity(0.3),
-            //               blurRadius: 8,
-            //             ),
-            //           ],
-            //         ),
-            //         child: IconButton(
-            //           onPressed: () {
-            //             final t = ctrl.text.trim();
-            //             if (t.isEmpty) return;
-            //             setState(() {
-            //               list.add({'text': t, 'done': false});
-            //               ctrl.clear();
-            //             });
-            //             widget.onChanged(list);
-            //           },
-            //           icon: Icon(Icons.add, color: Colors.white),
-            //         ),
-            //       ),
-            //     ),
-            //   ],
-            // ),
-            SizedBox(height: MediaQuery.of(context).viewInsets.bottom + 8),
-          ],
-        ),
+          ),
+          if (_unlocking)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedBuilder(
+                  animation: _burst,
+                  builder: (_, __) {
+                    final v = _burst.value;
+                    final op = (sin(v * pi) * 0.6).clamp(0.0, 1.0).toDouble();
+                    return Container(color: kGold.withOpacity(op));
+                  },
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
 }
 
-// ------------------- ANIMATION WIDGETS -------------------
-class BounceInAnimation extends StatefulWidget {
-  final Widget child;
-  final int delay;
-  const BounceInAnimation({Key? key, required this.child, this.delay = 0})
-    : super(key: key);
-  @override
-  State<BounceInAnimation> createState() => _BounceInAnimationState();
-}
-
-class _BounceInAnimationState extends State<BounceInAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: Duration(milliseconds: 600),
-      vsync: this,
-    );
-    _animation = CurvedAnimation(parent: _controller, curve: Curves.elasticOut);
-    Future.delayed(Duration(milliseconds: widget.delay), () {
-      if (mounted) _controller.forward();
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ScaleTransition(scale: _animation, child: widget.child);
-  }
-}
-
-class FadeInAnimation extends StatefulWidget {
-  final Widget child;
-  final int delay;
-  const FadeInAnimation({Key? key, required this.child, this.delay = 0})
-    : super(key: key);
-  @override
-  State<FadeInAnimation> createState() => _FadeInAnimationState();
-}
-
-class _FadeInAnimationState extends State<FadeInAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: Duration(milliseconds: 800),
-      vsync: this,
-    );
-    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
-    Future.delayed(Duration(milliseconds: widget.delay), () {
-      if (mounted) _controller.forward();
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FadeTransition(opacity: _animation, child: widget.child);
-  }
-}
-
-class SlideInAnimation extends StatefulWidget {
-  final Widget child;
-  final int delay;
-  const SlideInAnimation({Key? key, required this.child, this.delay = 0})
-    : super(key: key);
-  @override
-  State<SlideInAnimation> createState() => _SlideInAnimationState();
-}
-
-class _SlideInAnimationState extends State<SlideInAnimation>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<Offset> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: Duration(milliseconds: 500),
-      vsync: this,
-    );
-    _animation = Tween<Offset>(
-      begin: Offset(0, 0.5),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
-    Future.delayed(Duration(milliseconds: widget.delay), () {
-      if (mounted) _controller.forward();
-    });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SlideTransition(position: _animation, child: widget.child);
-  }
-}
-
-class BounceInCard extends StatefulWidget {
-  final Widget child;
-  const BounceInCard({Key? key, required this.child}) : super(key: key);
-  @override
-  State<BounceInCard> createState() => _BounceInCardState();
-}
-
-class _BounceInCardState extends State<BounceInCard>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: Duration(milliseconds: 800),
-      vsync: this,
-    )..repeat(reverse: true);
-    _animation = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _animation,
-      builder: (context, child) {
-        return Transform.translate(
-          offset: Offset(0, _animation.value * 4),
-          child: child,
-        );
-      },
-      child: widget.child,
-    );
-  }
-}
-
-class _AnimatedButton extends StatefulWidget {
-  final VoidCallback onPressed;
-  final IconData icon;
-  final String label;
-  const _AnimatedButton({
-    Key? key,
-    required this.onPressed,
-    required this.icon,
-    required this.label,
-  }) : super(key: key);
-  @override
-  State<_AnimatedButton> createState() => _AnimatedButtonState();
-}
-
-class _AnimatedButtonState extends State<_AnimatedButton>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: Duration(milliseconds: 200),
-      vsync: this,
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _onTap() {
-    _controller.forward().then((_) => _controller.reverse());
-    widget.onPressed();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: Tween(
-        begin: 1.0,
-        end: 0.95,
-      ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut)),
-      child: ElevatedButton.icon(
-        onPressed: _onTap,
-        icon: Icon(widget.icon),
-        label: Text(widget.label),
-        style: ElevatedButton.styleFrom(
-          padding: EdgeInsets.symmetric(vertical: 12),
-          minimumSize: Size(0, 0), // Allows button to be smaller
-        ),
-      ),
-    );
-  }
-}
-
-class _FloatingBubble extends StatefulWidget {
-  final String text;
-  const _FloatingBubble({Key? key, required this.text}) : super(key: key);
-  @override
-  State<_FloatingBubble> createState() => _FloatingBubbleState();
-}
-
-class _FloatingBubbleState extends State<_FloatingBubble>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: Duration(seconds: 2),
-      vsync: this,
-    )..repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Transform.translate(
-          offset: Offset(0, _controller.value * 10),
-          child: Opacity(opacity: 1.0 - _controller.value * 0.3, child: child),
-        );
-      },
-      child: Chip(
-        label: Text(widget.text),
-        backgroundColor: Colors.pink[50],
-        side: BorderSide(color: Colors.pink[100]!),
-      ),
-    );
-  }
-}
-
-class _SparklePainter extends CustomPainter {
-  final double animationValue;
-  _SparklePainter(this.animationValue);
+class _RipplePainter extends CustomPainter {
+  final double t;
+  final Color color;
+  _RipplePainter(this.t, this.color);
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.pink.withOpacity(0.1 * animationValue)
-      ..style = PaintingStyle.fill;
-
-    final sparkleCount = 20;
-    for (int i = 0; i < sparkleCount; i++) {
-      final x = (i * 37) % size.width;
-      final y = (i * 53) % size.height;
-      final radius = 1 + animationValue * 2;
-      canvas.drawCircle(Offset(x, y), radius, paint);
+    final c = size.center(Offset.zero);
+    for (var k = 0; k < 3; k++) {
+      final p = (t + k / 3) % 1.0;
+      final radius = 66 + p * 84;
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.6
+        ..color = color.withOpacity((1 - p) * 0.4);
+      canvas.drawCircle(c, radius, paint);
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  bool shouldRepaint(_RipplePainter old) => old.t != t || old.color != color;
 }
 
-class _FloatingWish {
-  final String text;
-  final String id;
-  _FloatingWish({required this.text, required this.id});
-}
-
-class _SongPlayerDialog extends StatefulWidget {
-  final VoidCallback onPlay;
-  final VoidCallback onReplay;
-  final VoidCallback onStop;
-
-  const _SongPlayerDialog({
-    Key? key,
-    required this.onPlay,
-    required this.onReplay,
-    required this.onStop,
-  }) : super(key: key);
-
-  @override
-  State<_SongPlayerDialog> createState() => _SongPlayerDialogState();
-}
-
-class _SongPlayerDialogState extends State<_SongPlayerDialog>
-    with SingleTickerProviderStateMixin {
-  bool isPlaying = false;
-  bool hasPlayed = false;
-  late AnimationController _rotationController;
-
-  @override
-  void initState() {
-    super.initState();
-    _rotationController = AnimationController(
-      duration: Duration(seconds: 4),
-      vsync: this,
-    )..repeat();
-    _startPlaying();
-  }
-
-  void _startPlaying() {
-    widget.onPlay();
-    setState(() {
-      isPlaying = true;
-      hasPlayed = true;
-    });
-  }
-
-  void _replaySong() {
-    widget.onReplay();
-    setState(() {
-      isPlaying = true;
-    });
-  }
-
-  @override
-  void dispose() {
-    _rotationController.dispose();
-    widget.onStop();
-    super.dispose();
-  }
+class _TimeBox extends StatelessWidget {
+  final String value;
+  final String label;
+  const _TimeBox({required this.value, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: CurvedAnimation(
-        parent: ModalRoute.of(context)!.animation!,
-        curve: Curves.elasticOut,
+    return Container(
+      width: 70,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.white.withOpacity(0.12),
+            Colors.white.withOpacity(0.04),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.14)),
       ),
-      child: AlertDialog(
-        backgroundColor: Colors.pink[50],
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            RotationTransition(
-              turns: _rotationController,
-              child: Icon(Icons.album, color: Colors.pink[700]),
-            ),
-            SizedBox(width: 10),
-            Text(
-              'My Song For You',
-              style: TextStyle(
-                color: Colors.pink[700],
-                fontWeight: FontWeight.bold,
+      child: Column(
+        children: [
+          SizedBox(
+            height: 40,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 350),
+              transitionBuilder: (child, anim) => SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, -0.6),
+                  end: Offset.zero,
+                ).animate(anim),
+                child: FadeTransition(opacity: anim, child: child),
               ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  colors: [Colors.pink[100]!, Colors.pink[300]!],
-                ),
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.pink[300]!, width: 3),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.pink.withOpacity(0.5),
-                    blurRadius: 15,
-                    spreadRadius: 2,
-                  ),
-                ],
-              ),
-              child: RotationTransition(
-                turns: _rotationController,
-                child: Icon(Icons.music_note, size: 50, color: Colors.white),
-              ),
-            ),
-            SizedBox(height: 20),
-            Text(
-              'I made this song just for you...\nEvery note is filled with my love',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.pink[800],
-                fontSize: 14,
-                height: 1.4,
-              ),
-            ),
-            SizedBox(height: 16),
-            if (isPlaying)
-              Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.volume_up, color: Colors.pink[600], size: 16),
-                    SizedBox(width: 6),
-                    Text(
-                      'Now playing...',
-                      style: TextStyle(
-                        color: Colors.pink[600],
-                        fontStyle: FontStyle.italic,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
+              child: Text(
+                value,
+                key: ValueKey(value),
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w600,
+                  color: kGold,
+                  height: 1.2,
+                  fontFeatures: [FontFeature.tabularFigures()],
                 ),
               ),
-          ],
-        ),
-        actions: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              TextButton(
-                onPressed: () {
-                  widget.onStop();
-                  Navigator.pop(context);
-                },
-                child: Text('Close'),
-              ),
-              if (hasPlayed)
-                ElevatedButton.icon(
-                  onPressed: _replaySong,
-                  icon: Icon(Icons.replay),
-                  label: Text('Play Again'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.pink[600],
-                    foregroundColor: Colors.white,
-                  ),
-                )
-              else
-                ElevatedButton.icon(
-                  onPressed: _startPlaying,
-                  icon: Icon(Icons.play_arrow),
-                  label: Text('Play Song'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.pink[600],
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-            ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 9,
+              letterSpacing: 2,
+              color: Colors.white54,
+            ),
           ),
         ],
       ),
@@ -1747,195 +918,1107 @@ class _SongPlayerDialogState extends State<_SongPlayerDialog>
   }
 }
 
-// Add the Message Player Dialog class at the bottom of your file
-class _MessagePlayerDialog extends StatefulWidget {
-  final VoidCallback onPlay;
-  final VoidCallback onReplay;
-  final VoidCallback onStop;
-
-  const _MessagePlayerDialog({
-    Key? key,
-    required this.onPlay,
-    required this.onReplay,
-    required this.onStop,
-  }) : super(key: key);
+// ============================================================
+// 3. HOME
+// ============================================================
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
 
   @override
-  State<_MessagePlayerDialog> createState() => _MessagePlayerDialogState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _MessagePlayerDialogState extends State<_MessagePlayerDialog>
-    with SingleTickerProviderStateMixin {
-  bool isPlaying = false;
-  bool hasPlayed = false;
-  late AnimationController _pulseController;
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  final _wishesKey = GlobalKey();
+  final _left = ConfettiController(duration: const Duration(seconds: 4));
+  final _right = ConfettiController(duration: const Duration(seconds: 4));
+  bool _blown = false;
 
   @override
   void initState() {
     super.initState();
-    _pulseController = AnimationController(
-      duration: Duration(milliseconds: 1500),
-      vsync: this,
-    )..repeat(reverse: true);
-    _startPlaying();
+    WidgetsBinding.instance.addObserver(this);
+    BirthdayMusic.start(); // no-op if the lock screen already started it
   }
 
-  void _startPlaying() {
-    widget.onPlay();
-    setState(() {
-      isPlaying = true;
-      hasPlayed = true;
-    });
-  }
-
-  void _replayMessage() {
-    widget.onReplay();
-    setState(() {
-      isPlaying = true;
-    });
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      BirthdayMusic.pause();
+    } else if (state == AppLifecycleState.resumed) {
+      BirthdayMusic.start();
+    }
   }
 
   @override
   void dispose() {
-    _pulseController.dispose();
-    widget.onStop();
+    WidgetsBinding.instance.removeObserver(this);
+    _left.dispose();
+    _right.dispose();
+    super.dispose();
+  }
+
+  void _onAllOut() {
+    BirthdayMusic.fadeOutAndStop();
+    _left.play();
+    _right.play();
+    HapticFeedback.heavyImpact();
+    if (_blown) return;
+    setState(() => _blown = true);
+    Future.delayed(const Duration(milliseconds: 2600), () {
+      final ctx = _wishesKey.currentContext;
+      if (ctx != null && mounted) {
+        Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.05,
+          duration: const Duration(milliseconds: 1100),
+          curve: Curves.easeInOutCubic,
+        );
+      }
+    });
+  }
+
+  Widget _confetti(ConfettiController c, double dir) => ConfettiWidget(
+        confettiController: c,
+        blastDirection: dir,
+        blastDirectionality: BlastDirectionality.directional,
+        emissionFrequency: 0.04,
+        numberOfParticles: 18,
+        maxBlastForce: 28,
+        minBlastForce: 10,
+        gravity: 0.18,
+        shouldLoop: false,
+        colors: const [kPink, kGold, Colors.white, kLilac, kRose],
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    return GuardedScaffold(
+      body: AmbientBg(
+        rising: true,
+        count: 36,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: SafeArea(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.only(top: 28, bottom: 24),
+                  child: Column(
+                    children: [
+                      const Reveal(child: _Header()),
+                      const SizedBox(height: 36),
+                      Reveal(
+                        delay: const Duration(milliseconds: 500),
+                        child: CakeSection(onAllOut: _onAllOut),
+                      ),
+                      if (_blown) ...[
+                        const SizedBox(height: 70),
+                        Reveal(
+                          delay: const Duration(milliseconds: 1200),
+                          child: Container(
+                            key: _wishesKey,
+                            child: const WishCards(),
+                          ),
+                        ),
+                        const SizedBox(height: 56),
+                        const Reveal(
+                          delay: Duration(milliseconds: 1800),
+                          child: VoiceNotePlayer(),
+                        ),
+                        const SizedBox(height: 56),
+                        const Reveal(
+                          delay: Duration(milliseconds: 2200),
+                          child: _Footer(),
+                        ),
+                        const SizedBox(height: 40),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.topLeft,
+              child: _confetti(_left, pi / 3),
+            ),
+            Align(
+              alignment: Alignment.topRight,
+              child: _confetti(_right, 2 * pi / 3),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Header extends StatelessWidget {
+  const _Header();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        const Text(
+          'HAPPY',
+          style: TextStyle(
+            fontSize: 15,
+            letterSpacing: 10,
+            color: Colors.white70,
+            fontWeight: FontWeight.w300,
+          ),
+        ),
+        const SizedBox(height: 4),
+        ShaderMask(
+          shaderCallback: (r) => const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [kGold, kPink],
+          ).createShader(r),
+          child: const Text(
+            '18',
+            style: TextStyle(
+              fontSize: 104,
+              fontWeight: FontWeight.w600,
+              height: 1.0,
+              color: Colors.white,
+            ),
+          ),
+        ),
+        Transform.translate(
+          offset: const Offset(0, -10),
+          child: Text('Birthday', style: script(40, color: kGold)),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          herName.toUpperCase(),
+          style: const TextStyle(
+            fontSize: 14,
+            letterSpacing: 6,
+            color: Colors.white70,
+            fontWeight: FontWeight.w300,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _Footer extends StatelessWidget {
+  const _Footer();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        const Icon(Icons.favorite,
+            color: kPink,
+            size: 28,
+            shadows: [Shadow(color: kPink, blurRadius: 20)]),
+        const SizedBox(height: 12),
+        Text('With all my love,', style: script(20, color: Colors.white70)),
+        Text(fromName, style: script(28, color: kGold)),
+      ],
+    );
+  }
+}
+
+// ------------------------------------------------------------
+// Cake: fully painted, flickering flames, smoke when blown out.
+// Tap a candle, swipe your finger across them, or press the button.
+// ------------------------------------------------------------
+class CakeSection extends StatefulWidget {
+  final VoidCallback onAllOut;
+  const CakeSection({super.key, required this.onAllOut});
+
+  @override
+  State<CakeSection> createState() => _CakeSectionState();
+}
+
+class _CakeSectionState extends State<CakeSection>
+    with TickerProviderStateMixin {
+  static const _count = 5;
+  static const _w = 320.0;
+  static const _h = 340.0;
+
+  late final AnimationController _flick = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  )..repeat();
+  late final List<AnimationController> _ext = List.generate(
+    _count,
+    (_) => AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+      reverseDuration: const Duration(milliseconds: 500),
+    ),
+  );
+  final List<bool> _out = List.filled(_count, false);
+  bool _done = false;
+
+  // microphone
+  NoiseMeter? _meter;
+  StreamSubscription<NoiseReading>? _micSub;
+  bool _micDenied = false;
+  double _lastDb = 0;
+
+  static Offset candlePos(int i) => Offset(160 + (i - 2) * 38.0, 92);
+
+  @override
+  void initState() {
+    super.initState();
+    _startMic();
+  }
+
+  @override
+  void dispose() {
+    _micSub?.cancel();
+    _flick.dispose();
+    for (final c in _ext) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _startMic() async {
+    if (_micSub != null) return;
+    try {
+      final status = await Permission.microphone.request();
+      if (!mounted) return;
+      if (!status.isGranted) {
+        setState(() => _micDenied = true);
+        return;
+      }
+      _meter ??= NoiseMeter();
+      _micSub = _meter!.noise.listen(
+        _onNoise,
+        onError: (Object _) {
+          _stopMic();
+          if (mounted) setState(() => _micDenied = true);
+        },
+      );
+      if (mounted) setState(() => _micDenied = false);
+    } catch (_) {
+      if (mounted) setState(() => _micDenied = true);
+    }
+  }
+
+  void _stopMic() {
+    _micSub?.cancel();
+    _micSub = null;
+  }
+
+  void _onNoise(NoiseReading r) {
+    if (_done) return;
+    if (showMicDebug) setState(() => _lastDb = r.maxDecibel);
+    if (r.maxDecibel >= blowThresholdDb) {
+      final i = _out.indexOf(false);
+      if (i != -1) _blow(i);
+    }
+  }
+
+  void _blow(int i) {
+    if (_out[i]) return;
+    _out[i] = true;
+    _ext[i].forward();
+    HapticFeedback.selectionClick();
+    setState(() {});
+    if (_out.every((o) => o) && !_done) {
+      _done = true;
+      _stopMic();
+      Future.delayed(const Duration(milliseconds: 700), () {
+        if (mounted) widget.onAllOut();
+      });
+    }
+  }
+
+  // Tap or swipe on the candles still works (fallback if the mic is denied)
+  void _hit(Offset p) {
+    for (var i = 0; i < _count; i++) {
+      final c = candlePos(i);
+      if ((p.dx - c.dx).abs() < 22 && p.dy > c.dy - 40 && p.dy < c.dy + 50) {
+        _blow(i);
+      }
+    }
+  }
+
+  void _relight() {
+    HapticFeedback.lightImpact();
+    for (var i = 0; i < _count; i++) {
+      _out[i] = false;
+      _ext[i].reverse();
+    }
+    _done = false;
+    setState(() {});
+    _startMic();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final allOut = _out.every((o) => o);
+    return Column(
+      children: [
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 500),
+          child: Text(
+            allOut
+                ? 'Hope your wish comes true'
+                : (_micDenied
+                    ? 'Make a wish, then tap the candles'
+                    : 'Make a wish, then blow them out'),
+            key: ValueKey('$allOut$_micDenied'),
+            style: allOut
+                ? script(20, color: kGold)
+                : const TextStyle(
+                    fontSize: 13,
+                    letterSpacing: 2,
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w300,
+                  ),
+          ),
+        ),
+        GestureDetector(
+          onTapDown: (d) => _hit(d.localPosition),
+          onPanUpdate: (d) => _hit(d.localPosition),
+          child: SizedBox(
+            width: _w,
+            height: _h,
+            child: CustomPaint(painter: _CakePainter(_flick, _ext)),
+          ),
+        ),
+        const SizedBox(height: 22),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 400),
+          child: allOut
+              ? TextButton.icon(
+                  key: const ValueKey('relight'),
+                  onPressed: _relight,
+                  icon: const Icon(Icons.local_fire_department, size: 18),
+                  label: const Text('Light them again'),
+                  style: TextButton.styleFrom(foregroundColor: kGold),
+                )
+              : _micDenied
+                  ? TextButton.icon(
+                      key: const ValueKey('retry'),
+                      onPressed: _startMic,
+                      icon: const Icon(Icons.mic_off_rounded, size: 18),
+                      label: const Text('Enable microphone'),
+                      style: TextButton.styleFrom(foregroundColor: kPink),
+                    )
+                  : AnimatedBuilder(
+                      key: const ValueKey('listening'),
+                      animation: _flick,
+                      builder: (_, __) {
+                        final p = sin(2 * pi * _flick.value);
+                        return Column(
+                          children: [
+                            Transform.scale(
+                              scale: 1 + 0.14 * p,
+                              child: Container(
+                                width: 64,
+                                height: 64,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: kPink.withOpacity(0.14),
+                                  border: Border.all(
+                                    color: kPink.withOpacity(0.5 + 0.3 * p),
+                                    width: 1.5,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: kPink.withOpacity(0.25 + 0.15 * p),
+                                      blurRadius: 24,
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(Icons.mic_rounded,
+                                    color: kPink, size: 30),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text(
+                              'BLOW INTO YOUR MIC',
+                              style: TextStyle(
+                                fontSize: 11,
+                                letterSpacing: 3,
+                                color: Colors.white54,
+                              ),
+                            ),
+                            if (showMicDebug)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: Text(
+                                  '${_lastDb.toStringAsFixed(1)} dB (need ${blowThresholdDb.toStringAsFixed(0)})',
+                                  style: const TextStyle(
+                                      fontSize: 11, color: kGold),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CakePainter extends CustomPainter {
+  final Animation<double> flick;
+  final List<AnimationController> ext;
+  _CakePainter(this.flick, this.ext)
+      : super(repaint: Listenable.merge([flick, ...ext]));
+
+  static const _candleColors = [kPink, kGold, kLilac, kGold, kPink];
+  static const _sprinkles = [
+    kGold,
+    Colors.white,
+    kLilac,
+    Color(0xFF8FE3CF),
+    kPink,
+  ];
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // ground glow
+    canvas.drawOval(
+      Rect.fromCenter(center: const Offset(160, 330), width: 300, height: 34),
+      Paint()
+        ..color = kPink.withOpacity(0.38)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 22),
+    );
+
+    // plate
+    final plate = RRect.fromRectAndRadius(
+      const Rect.fromLTWH(0, 316, 320, 16),
+      const Radius.circular(8),
+    );
+    canvas.drawRRect(
+      plate,
+      Paint()
+        ..shader = const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xFFF3EEFB), Color(0xFFB9A8D9)],
+        ).createShader(plate.outerRect),
+    );
+
+    // tiers: bottom first so upper tiers overlap
+    _tier(canvas, const Rect.fromLTWH(20, 244, 280, 74), kRose,
+        const Color(0xFFB8457E), 1);
+    _tier(canvas, const Rect.fromLTWH(45, 182, 230, 68),
+        const Color(0xFFFFB7CE), kRose, 2);
+    _tier(canvas, const Rect.fromLTWH(70, 130, 180, 58), kPink,
+        const Color(0xFFF07AA3), 3);
+
+    // "18" on middle tier
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '18',
+        style: TextStyle(
+          fontFamily: 'Pacifico',
+          fontSize: 32,
+          color: Colors.white.withOpacity(0.95),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(160 - tp.width / 2, 202));
+
+    // hearts on bottom tier
+    final hp = Paint()..color = Colors.white.withOpacity(0.9);
+    for (final x in [70.0, 115.0, 205.0, 250.0]) {
+      canvas.drawPath(heartPath(Offset(x, 290), 6), hp);
+    }
+    canvas.drawPath(
+        heartPath(const Offset(160, 290), 9), Paint()..color = kGold);
+
+    // candles + flames
+    for (var i = 0; i < ext.length; i++) {
+      final p = _CakeSectionState.candlePos(i);
+      _candle(canvas, p, _candleColors[i]);
+      _flame(canvas, p, i, ext[i].value);
+    }
+  }
+
+  void _tier(Canvas c, Rect r, Color top, Color bottom, int seed) {
+    final rr = RRect.fromRectAndRadius(r, const Radius.circular(14));
+    c.drawRRect(
+      rr,
+      Paint()
+        ..shader = LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [top, bottom],
+        ).createShader(r),
+    );
+
+    final rnd = Random(seed * 13);
+
+    // sprinkles
+    for (var n = 0; n < 16; n++) {
+      final x = r.left + 12 + rnd.nextDouble() * (r.width - 24);
+      final y = r.top + 30 + rnd.nextDouble() * (r.height - 40);
+      c.save();
+      c.translate(x, y);
+      c.rotate(rnd.nextDouble() * pi);
+      c.drawRRect(
+        RRect.fromRectAndRadius(
+          const Rect.fromLTWH(-4, -1.5, 8, 3),
+          const Radius.circular(1.5),
+        ),
+        Paint()..color = _sprinkles[rnd.nextInt(_sprinkles.length)],
+      );
+      c.restore();
+    }
+
+    // frosting band + drips
+    final white = Paint()..color = Colors.white;
+    c.drawRRect(
+      RRect.fromRectAndCorners(
+        Rect.fromLTWH(r.left, r.top, r.width, 14),
+        topLeft: const Radius.circular(14),
+        topRight: const Radius.circular(14),
+      ),
+      white,
+    );
+    var x = r.left + 8;
+    while (x + 14 < r.right - 4) {
+      final len = 8 + rnd.nextDouble() * 18;
+      final w = 12 + rnd.nextDouble() * 4;
+      c.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, r.top + 6, w, len + 8),
+          Radius.circular(w / 2),
+        ),
+        white,
+      );
+      x += w + 7 + rnd.nextDouble() * 4;
+    }
+  }
+
+  void _candle(Canvas c, Offset top, Color color) {
+    final body = RRect.fromRectAndRadius(
+      Rect.fromLTWH(top.dx - 5, top.dy, 10, 42),
+      const Radius.circular(3),
+    );
+    c.drawRRect(body, Paint()..color = color);
+    // stripes
+    final stripe = Paint()..color = Colors.white.withOpacity(0.55);
+    for (var k = 0; k < 4; k++) {
+      c.drawRect(Rect.fromLTWH(top.dx - 5, top.dy + 6 + k * 10, 10, 3), stripe);
+    }
+    // wick
+    c.drawRect(
+      Rect.fromLTWH(top.dx - 0.8, top.dy - 5, 1.6, 6),
+      Paint()..color = const Color(0xFF3B2A2A),
+    );
+  }
+
+  void _flame(Canvas c, Offset top, int i, double e) {
+    final base = Offset(top.dx, top.dy - 4);
+    final alive = (1 - e * 3).clamp(0.0, 1.0).toDouble();
+
+    if (alive > 0) {
+      final f = flick.value;
+      final sway = sin(2 * pi * (f + i * 0.2)) * 1.8;
+      final hgt = 28 * (0.9 + 0.14 * sin(2 * pi * (f * 2 + i * 0.37))) * alive;
+      final w = 7.0 * alive;
+
+      // glow
+      c.drawCircle(
+        Offset(base.dx, base.dy - hgt * 0.45),
+        26 * alive,
+        Paint()
+          ..shader = RadialGradient(
+            colors: [kGold.withOpacity(0.38), Colors.transparent],
+          ).createShader(Rect.fromCircle(
+            center: Offset(base.dx, base.dy - hgt * 0.45),
+            radius: 26 * alive,
+          )),
+      );
+
+      _flamePath(c, base, w, hgt, sway, const Color(0xFFFFA83D));
+      _flamePath(
+          c, base, w * 0.55, hgt * 0.6, sway * 0.6, const Color(0xFFFFF1B8));
+    }
+
+    // smoke wisp
+    if (e > 0.12 && e < 1.0) {
+      final s = (e - 0.12) / 0.88;
+      final paint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.round
+        ..color = Colors.white.withOpacity((1 - s) * 0.5);
+      final path = Path()..moveTo(base.dx, base.dy);
+      for (var k = 1; k <= 14; k++) {
+        final u = k / 14;
+        path.lineTo(
+          base.dx + sin(u * 6 + s * 7) * 5 * u,
+          base.dy - 58 * s * u,
+        );
+      }
+      c.drawPath(path, paint);
+    }
+  }
+
+  void _flamePath(
+      Canvas c, Offset base, double w, double h, double sway, Color color) {
+    final path = Path()..moveTo(base.dx, base.dy);
+    path.cubicTo(
+      base.dx - w * 1.5,
+      base.dy - h * 0.35,
+      base.dx - w * 0.6,
+      base.dy - h * 0.75,
+      base.dx + sway,
+      base.dy - h,
+    );
+    path.cubicTo(
+      base.dx + w * 0.6,
+      base.dy - h * 0.75,
+      base.dx + w * 1.5,
+      base.dy - h * 0.35,
+      base.dx,
+      base.dy,
+    );
+    path.close();
+    c.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_CakePainter old) => false;
+}
+
+// ------------------------------------------------------------
+// Wish cards: 3D tilt + scale on neighbours, haptic on swipe
+// ------------------------------------------------------------
+class WishCards extends StatefulWidget {
+  const WishCards({super.key});
+
+  @override
+  State<WishCards> createState() => _WishCardsState();
+}
+
+class _WishCardsState extends State<WishCards> {
+  static const _palettes = [
+    [Color(0xFF7B2D8E), Color(0xFFD1497F)],
+    [Color(0xFF3F2B96), Color(0xFFA8C0FF)],
+    [Color(0xFFB03A6F), Color(0xFFFF9A8B)],
+    [Color(0xFF1F4E8C), Color(0xFFB06AB3)],
+    [Color(0xFF8E2DE2), Color(0xFFFF6FA5)],
+  ];
+
+  final _page = PageController(viewportFraction: 0.8);
+  double _current = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _page.addListener(() => setState(() => _current = _page.page ?? 0));
+  }
+
+  @override
+  void dispose() {
+    _page.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: CurvedAnimation(
-        parent: ModalRoute.of(context)!.animation!,
-        curve: Curves.elasticOut,
-      ),
-      child: AlertDialog(
-        backgroundColor: Colors.purple[50],
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            AnimatedBuilder(
-              animation: _pulseController,
-              builder: (context, child) {
-                return Icon(
-                  Icons.record_voice_over,
-                  color: Colors.purple[700],
-                  size: 24 + (_pulseController.value * 4),
-                );
-              },
-            ),
-            SizedBox(width: 10),
-            Text(
-              'My Special Message',
-              style: TextStyle(
-                color: Colors.purple[700],
-                fontWeight: FontWeight.bold,
-                fontSize: 20,
-              ),
-            ),
-          ],
+    return Column(
+      children: [
+        Text('A few wishes for you', style: script(24, color: kGold)),
+        const SizedBox(height: 6),
+        const Text(
+          'SWIPE',
+          style: TextStyle(
+            fontSize: 11,
+            letterSpacing: 5,
+            color: Colors.white54,
+          ),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  colors: [Colors.purple[100]!, Colors.purple[300]!],
-                ),
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.purple[300]!, width: 3),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.purple.withOpacity(0.5),
-                    blurRadius: 15,
-                    spreadRadius: 2,
+        const SizedBox(height: 24),
+        SizedBox(
+          height: 340,
+          child: PageView.builder(
+            controller: _page,
+            itemCount: wishes.length,
+            physics: const BouncingScrollPhysics(),
+            onPageChanged: (_) => HapticFeedback.selectionClick(),
+            itemBuilder: (_, i) {
+              final diff = (_current - i).clamp(-1.0, 1.0).toDouble();
+              final pal = _palettes[i % _palettes.length];
+              return Transform(
+                alignment:
+                    diff > 0 ? Alignment.centerRight : Alignment.centerLeft,
+                transform: Matrix4.identity()
+                  ..setEntry(3, 2, 0.0012)
+                  ..rotateY(-diff * 0.55)
+                  ..scale(1 - diff.abs() * 0.1, 1 - diff.abs() * 0.1, 1.0),
+                child: Opacity(
+                  opacity: 1 - diff.abs() * 0.35,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    padding: const EdgeInsets.fromLTRB(26, 24, 26, 22),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: pal,
+                      ),
+                      borderRadius: BorderRadius.circular(28),
+                      border: Border.all(
+                          color: Colors.white.withOpacity(0.25), width: 1),
+                      boxShadow: [
+                        BoxShadow(
+                          color: pal[1].withOpacity(0.35),
+                          blurRadius: 28,
+                          offset: const Offset(0, 14),
+                        ),
+                      ],
+                    ),
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          top: -6,
+                          left: -2,
+                          child: Text(
+                            '\u201C',
+                            style: TextStyle(
+                              fontSize: 80,
+                              height: 1,
+                              color: Colors.white.withOpacity(0.22),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        Align(
+                          alignment: Alignment.topRight,
+                          child: Text(
+                            '${i + 1} / ${wishes.length}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              letterSpacing: 2,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ),
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 22),
+                            child: Text(
+                              wishes[i],
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 17,
+                                height: 1.65,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w400,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Icon(Icons.favorite,
+                              size: 20, color: Colors.white70),
+                        ),
+                      ],
+                    ),
                   ),
-                ],
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 18),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(wishes.length, (i) {
+            final active = _current.round() == i;
+            return AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              width: active ? 22 : 7,
+              height: 7,
+              decoration: BoxDecoration(
+                color: active ? kGold : Colors.white24,
+                borderRadius: BorderRadius.circular(4),
               ),
-              child: AnimatedBuilder(
-                animation: _pulseController,
-                builder: (context, child) {
-                  return Icon(
-                    Icons.voice_chat,
-                    size: 50 + (_pulseController.value * 10),
-                    color: Colors.white,
-                  );
-                },
-              ),
-            ),
-            SizedBox(height: 20),
-            Text(
-              'My special message for you...\nEvery word comes straight from my heart',
-              textAlign: TextAlign.center,
+            );
+          }),
+        ),
+      ],
+    );
+  }
+}
+
+// ------------------------------------------------------------
+// Voice note: waveform player (tap or drag the waveform to seek)
+// ------------------------------------------------------------
+class VoiceNotePlayer extends StatefulWidget {
+  const VoiceNotePlayer({super.key});
+
+  @override
+  State<VoiceNotePlayer> createState() => _VoiceNotePlayerState();
+}
+
+class _VoiceNotePlayerState extends State<VoiceNotePlayer>
+    with TickerProviderStateMixin {
+  final _player = AudioPlayer();
+  final List<StreamSubscription> _subs = [];
+
+  late final AnimationController _wave = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 2),
+  );
+  late final AnimationController _pp = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+  );
+
+  bool _ready = false;
+  bool _error = false;
+  bool _playing = false;
+  Duration _pos = Duration.zero;
+  Duration _total = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+    _subs.add(_player.playerStateStream.listen((s) {
+      final playing =
+          s.playing && s.processingState != ProcessingState.completed;
+      if (playing != _playing) {
+        _playing = playing;
+        if (playing) {
+          _wave.repeat();
+          _pp.forward();
+        } else {
+          _wave.stop();
+          _pp.reverse();
+        }
+        if (mounted) setState(() {});
+      }
+      if (s.processingState == ProcessingState.completed) {
+        _player.pause();
+        _player.seek(Duration.zero);
+      }
+    }));
+    _subs.add(_player.positionStream.listen((p) {
+      if (mounted) setState(() => _pos = p);
+    }));
+    _subs.add(_player.durationStream.listen((d) {
+      if (mounted && d != null) setState(() => _total = d);
+    }));
+  }
+
+  Future<void> _init() async {
+    try {
+      await _player.setAsset(voiceNoteAsset);
+      if (mounted) setState(() => _ready = true);
+    } catch (_) {
+      if (mounted) setState(() => _error = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (final s in _subs) {
+      s.cancel();
+    }
+    _wave.dispose();
+    _pp.dispose();
+    _player.dispose();
+    super.dispose();
+  }
+
+  String _fmt(Duration d) =>
+      '${d.inMinutes}:${(d.inSeconds % 60).toString().padLeft(2, '0')}';
+
+  void _seekTo(double dx, double width) {
+    if (_total == Duration.zero) return;
+    final f = (dx / width).clamp(0.0, 1.0).toDouble();
+    _player.seek(Duration(milliseconds: (_total.inMilliseconds * f).round()));
+  }
+
+  void _toggle() {
+    if (!_ready) return;
+    HapticFeedback.lightImpact();
+    _playing ? _player.pause() : _player.play();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final progress = _total.inMilliseconds == 0
+        ? 0.0
+        : (_pos.inMilliseconds / _total.inMilliseconds).clamp(0.0, 1.0);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
+        decoration: glass(radius: 28),
+        child: Column(
+          children: [
+            Text('One more thing...', style: script(22, color: kGold)),
+            const SizedBox(height: 4),
+            const Text(
+              'A VOICE NOTE, JUST FOR YOU',
               style: TextStyle(
-                color: Colors.purple[800],
-                fontSize: 14,
-                height: 1.4,
+                fontSize: 10,
+                letterSpacing: 3,
+                color: Colors.white54,
               ),
             ),
-            SizedBox(height: 16),
-            if (isPlaying)
-              Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.volume_up, color: Colors.purple[600], size: 16),
-                    SizedBox(width: 6),
-                    Text(
-                      'Playing your special message...',
-                      style: TextStyle(
-                        color: Colors.purple[600],
-                        fontStyle: FontStyle.italic,
-                        fontSize: 12,
+            const SizedBox(height: 28),
+            if (_error)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Text(
+                  'Voice note not found',
+                  style: TextStyle(color: Colors.white54),
+                ),
+              )
+            else ...[
+              LayoutBuilder(
+                builder: (_, box) => GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTapDown: (d) => _seekTo(d.localPosition.dx, box.maxWidth),
+                  onHorizontalDragUpdate: (d) =>
+                      _seekTo(d.localPosition.dx, box.maxWidth),
+                  child: SizedBox(
+                    height: 70,
+                    width: double.infinity,
+                    child: AnimatedBuilder(
+                      animation: _wave,
+                      builder: (_, __) => CustomPaint(
+                        painter: _WavePainter(progress, _wave.value, _playing),
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(_fmt(_pos),
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 12)),
+                  Text(_fmt(_total),
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 12)),
+                ],
+              ),
+              const SizedBox(height: 18),
+              GestureDetector(
+                onTap: _toggle,
+                child: SizedBox(
+                  width: 120,
+                  height: 120,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      AnimatedBuilder(
+                        animation: _wave,
+                        builder: (_, __) {
+                          if (!_playing) return const SizedBox.shrink();
+                          final p = (_wave.value * 2) % 1.0;
+                          return Transform.scale(
+                            scale: 1 + p * 0.55,
+                            child: Container(
+                              width: 80,
+                              height: 80,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: kPink.withOpacity((1 - p) * 0.5),
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      Container(
+                        width: 80,
+                        height: 80,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [kPink, kRose],
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: kPink.withOpacity(0.5),
+                              blurRadius: 26,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: AnimatedIcon(
+                            icon: AnimatedIcons.play_pause,
+                            progress: _pp,
+                            size: 40,
+                            color: kBgTop,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
-        actions: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              TextButton(
-                onPressed: () {
-                  widget.onStop();
-                  Navigator.pop(context);
-                },
-                style: ElevatedButton.styleFrom(
-                  foregroundColor: Colors.purple[600],
-                ),
-                child: Text('Close'),
-              ),
-              if (hasPlayed)
-                ElevatedButton.icon(
-                  onPressed: _replayMessage,
-                  icon: Icon(Icons.replay),
-                  label: Text('Play Again'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purple[600],
-                    foregroundColor: Colors.white,
-                  ),
-                )
-              else
-                ElevatedButton.icon(
-                  onPressed: _startPlaying,
-                  icon: Icon(Icons.play_arrow),
-                  label: Text('Play Message'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purple[600],
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-            ],
-          ),
-        ],
       ),
     );
   }
+}
+
+class _WavePainter extends CustomPainter {
+  final double progress;
+  final double phase;
+  final bool playing;
+  _WavePainter(this.progress, this.phase, this.playing);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const n = 38;
+    final gap = size.width / n;
+    final bw = gap * 0.56;
+    for (var i = 0; i < n; i++) {
+      final base = 0.26 +
+          0.74 * (sin(i * 0.9).abs() * 0.6 + cos(i * 0.37 + 1).abs() * 0.4);
+      final amp =
+          playing ? 0.72 + 0.28 * sin(2 * pi * (phase * 2) + i * 0.6) : 1.0;
+      final h = size.height * base * amp;
+      final x = i * gap + gap / 2;
+      final played = (i + 0.5) / n <= progress;
+      final paint = Paint()
+        ..color = played
+            ? Color.lerp(kPink, kGold, i / n)!
+            : Colors.white.withOpacity(0.25);
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromCenter(
+              center: Offset(x, size.height / 2), width: bw, height: h),
+          Radius.circular(bw / 2),
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_WavePainter old) =>
+      old.progress != progress || old.phase != phase || old.playing != playing;
 }
