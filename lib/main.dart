@@ -19,9 +19,94 @@ const fromName = 'Daddy❤️';
 // Unlock moment (device local time). 12:00 am on 26 Nov 2026.
 final DateTime unlockTime = DateTime(2026, 11, 26, 0, 0);
 
+// First day you two got together. Drives the live counter.
+final DateTime togetherSince = DateTime(2024, 8, 24); // CHANGE THIS
+
 // Set to true while testing: unlocks 10 seconds after the lock screen opens
 // and ignores the saved "already unlocked" flag.
-const bool debugQuickUnlock = false;
+const bool debugQuickUnlock = true;
+
+class OpenWhen {
+  final String title, body;
+  const OpenWhen(this.title, this.body);
+}
+
+const openWhen = <OpenWhen>[
+  OpenWhen(
+    'Open when you miss me',
+    'I miss you too, probably more than I manage to put into words. '
+        'You know what I do when I miss you? I imagine all the little things '
+        'we would be doing if we were together. No calls to wait for, no '
+        'counting minutes, no distance. Just us. And when I finally see you, '
+        'I am not letting you go for a very, very long hug. You have been '
+        'warned. ❤️',
+  ),
+  OpenWhen(
+    "Open when you can't sleep",
+    'Close your eyes for a second and imagine a day when we don’t have '
+        'to worry about when we will talk next. Imagine an ordinary evening. '
+        'You telling me random things about your day, me listening, probably '
+        'teasing you about something, and both of us slowly getting sleepy. '
+        'Nothing extraordinary. Just you and me, sharing the same little '
+        'world. I think those ordinary days are the ones I look forward to '
+        'the most. Now stop overthinking and get some sleep, sleepyhead. ❤️',
+  ),
+  OpenWhen(
+    'Open when you are sad',
+    'Hey, come here. ❤️ I wish I could actually be there to hold you '
+        'right now. You don\'t have to pretend to be okay with me, and you '
+        'don\'t have to figure everything out today. Whatever it is, we will '
+        'take it one day at a time. I know things aren\'t always easy, but '
+        'please never think you have to face everything alone. I am here, '
+        'even on the days when I cannot be there physically. And remember, '
+        'you are loved. Very, very much.',
+  ),
+  OpenWhen(
+    'Open when you are mad at me',
+    'Okay first of all, I would like to formally apologise for being '
+        'such an annoying human being. 😂 I know I can be stubborn, '
+        'overthink things, and sometimes make things more complicated than '
+        'they need to be. But listen, I would rather have an honest '
+        'conversation with you than let a silly argument become a distance '
+        'between us. I am not always right (shocking, I know), but I will '
+        'always try to understand you. Now can we please stop being angry '
+        'at each other? I miss my favourite person.',
+  ),
+  OpenWhen(
+    'Open when you need to laugh',
+    'HAHAHAHA. First of all, why are you opening this? 😂 Did you run '
+        'out of people to annoy? Anyway, imagine me sitting beside you '
+        'right now, looking at you with the most serious face possible, '
+        'and then saying something completely stupid just to make you '
+        'laugh. You know I would do that. And if you are still not laughing, '
+        'I officially declare this letter a failure. You owe me one smile '
+        'when we meet. No excuses. ❤️',
+  ),
+];
+
+const memories = <String>[
+  'Who would have thought a game like Valorant would lead me to the person I would want to spend my entire life with? Funny how life works, huh?',
+  'We met through a common friend, completely unaware that this little introduction would eventually become one of the most beautiful parts of our lives.',
+  'I know we were both a little sceptical in the beginning. Neither of us knew where this would go, but somewhere along the way, we stopped being afraid and started falling for each other.',
+  'We could have let our doubts win. We could have walked away. But we chose to give us a chance, and baby, I would make that choice all over again.',
+  'August 24, 2024. The day our story officially became ours. Just one date, but a lifetime of meaning attached to it.',
+  'Sometimes I think about how someone who started as a stranger in a game became the person I want beside me through every chapter of life.',
+  'Even with all the distance between us, you have found a way to become such a big part of my everyday life. I wish you could see how much that means to me.',
+  'I know we cannot always talk whenever we want to, and I wish things were easier. But even the smallest conversations with you can make my entire day.',
+  'Your trust means the world to me. I never want you to question whether you can count on me. I want to be your safe place, just as you have been mine.',
+  'Thank you for standing by me, believing in me, and supporting me even when things get difficult. I hope I give you even half the comfort you bring into my life.',
+  'Sometimes I catch myself daydreaming about the most ordinary things with you. Waking up beside you, having breakfast together, arguing over silly things, and ending every day with you.',
+  'I cannot wait for the day when goodnight does not mean closing a call, and good morning does not mean wishing you were right next to me.',
+  'I imagine our little home, filled with laughter, random conversations, silly arguments, and the kind of happiness that comes from simply being together.',
+  'And then there are our two little munchkins, Vrishti and Vrushabh. Our future daughter and son. I wonder which one will be more mischievous and which one will have us wrapped around their little fingers.',
+  'I can already imagine us watching our little family grow, making memories, celebrating tiny milestones, and realising that all those years of dreaming were worth it.',
+  'I want to build a life where you never have to feel alone in your struggles. Where we face the difficult days together and celebrate even the smallest victories together.',
+  'I do not expect every day to be perfect. I just want every version of life, the beautiful days and the difficult ones, to have you and me choosing each other.',
+  'And if I could make one wish for our future, it would be this: one day, we look at the life we built, our little Vrishti and Vrushabh running around, and realise that we really made it. I love you so, so much, my baby bun bun.'
+];
+
+// Shown when every star is lit. One line, your voice.
+const starsFinale = 'I LOVE YOU SOOOO MUCH ❤️';
 
 const voiceNoteAsset = 'assets/audio/birthday_greetings.mp3';
 
@@ -42,6 +127,19 @@ const double blowThresholdDb = 78;
 // true = shows the live mic dB reading under the cake so you can tune the
 // threshold. Set back to false for the real build.
 const bool showMicDebug = false;
+
+const cityYou = 'Madgaon';
+const cityHer = 'Gorakhpur';
+
+// Straight-line distance in km. Google Maps: right-click one city,
+// "Measure distance", click the other.
+const distanceKm = 2300;
+
+// Next time you'll see her. Leave null to hide the countdown line.
+final DateTime nextMeeting = DateTime(2029, 1, 1); // e.g. DateTime(2027, 1, 15)
+
+// One line under the number. Your voice.
+const distanceLine = 'Annoyingly far. Absolutely worth it.';
 
 const wishes = <String>[
   'Happy 18th birthday! You are officially an adult, but you will always be my favourite kid at heart.',
@@ -1020,6 +1118,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             key: _wishesKey,
                             child: const WishCards(),
                           ),
+                        ),
+                        const SizedBox(height: 56),
+                        const Reveal(
+                          delay: Duration(milliseconds: 1500),
+                          child: TogetherCounter(),
+                        ),
+                        const SizedBox(height: 56),
+                        const Reveal(
+                          delay: Duration(milliseconds: 1550),
+                          child: TwoCities(),
+                        ),
+                        const SizedBox(height: 56),
+                        const Reveal(
+                          delay: Duration(milliseconds: 1600),
+                          child: MemoryStars(),
+                        ),
+                        const SizedBox(height: 56),
+                        const Reveal(
+                          delay: Duration(milliseconds: 1650),
+                          child: OpenWhenCards(),
+                        ),
+                        const SizedBox(height: 56),
+                        const Reveal(
+                          delay: Duration(milliseconds: 1750),
+                          child: HeartbeatPad(),
                         ),
                         const SizedBox(height: 56),
                         const Reveal(
@@ -2021,4 +2144,632 @@ class _WavePainter extends CustomPainter {
   @override
   bool shouldRepaint(_WavePainter old) =>
       old.progress != progress || old.phase != phase || old.playing != playing;
+}
+
+class TogetherCounter extends StatefulWidget {
+  const TogetherCounter({super.key});
+  @override
+  State<TogetherCounter> createState() => _TogetherCounterState();
+}
+
+class _TogetherCounterState extends State<TogetherCounter> {
+  Timer? _t;
+  Duration _d = DateTime.now().difference(togetherSince);
+
+  @override
+  void initState() {
+    super.initState();
+    _t = Timer.periodic(const Duration(seconds: 1), (_) {
+      setState(() => _d = DateTime.now().difference(togetherSince));
+    });
+  }
+
+  @override
+  void dispose() {
+    _t?.cancel();
+    super.dispose();
+  }
+
+  String _two(int n) => n.toString().padLeft(2, '0');
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text('Loving you for', style: script(24, color: kGold)),
+        const SizedBox(height: 18),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _TimeBox(value: _two(_d.inDays), label: 'DAYS'),
+            _TimeBox(value: _two(_d.inHours % 24), label: 'HOURS'),
+            _TimeBox(value: _two(_d.inMinutes % 60), label: 'MINS'),
+            _TimeBox(value: _two(_d.inSeconds % 60), label: 'SECS'),
+          ],
+        ),
+        const SizedBox(height: 10),
+        const Text(
+          'AND COUNTING',
+          style:
+              TextStyle(fontSize: 11, letterSpacing: 4, color: Colors.white54),
+        ),
+      ],
+    );
+  }
+}
+
+class OpenWhenCards extends StatefulWidget {
+  const OpenWhenCards({super.key});
+  @override
+  State<OpenWhenCards> createState() => _OpenWhenCardsState();
+}
+
+class _OpenWhenCardsState extends State<OpenWhenCards> {
+  final Set<int> _opened = {};
+
+  @override
+  void initState() {
+    super.initState();
+    SharedPreferences.getInstance().then((p) {
+      if (!mounted) return;
+      setState(() {
+        for (var i = 0; i < openWhen.length; i++) {
+          if (p.getBool('ow_$i') ?? false) _opened.add(i);
+        }
+      });
+    });
+  }
+
+  Future<void> _open(int i) async {
+    HapticFeedback.mediumImpact();
+    setState(() => _opened.add(i));
+    (await SharedPreferences.getInstance()).setBool('ow_$i', true);
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(28, 30, 28, 40),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [kBgMid, kBgBottom],
+          ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(openWhen[i].title,
+                  style: script(24, color: kGold), textAlign: TextAlign.center),
+              const SizedBox(height: 22),
+              TweenAnimationBuilder<int>(
+                tween: IntTween(begin: 0, end: openWhen[i].body.length),
+                duration: Duration(milliseconds: openWhen[i].body.length * 35),
+                builder: (_, n, __) => Text(
+                  openWhen[i].body.substring(0, n),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 16, height: 1.7, color: Colors.white),
+                ),
+              ),
+              const SizedBox(height: 22),
+              const Icon(Icons.favorite, color: kPink, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text('Keep these close', style: script(24, color: kGold)),
+        const SizedBox(height: 6),
+        const Text('OPEN WHEN...',
+            style: TextStyle(
+                fontSize: 11, letterSpacing: 5, color: Colors.white54)),
+        const SizedBox(height: 20),
+        for (var i = 0; i < openWhen.length; i++)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(28, 0, 28, 12),
+            child: GestureDetector(
+              onTap: () => _open(i),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                decoration: glass(radius: 20),
+                child: Row(
+                  children: [
+                    Icon(
+                      _opened.contains(i)
+                          ? Icons.drafts_rounded
+                          : Icons.mail_rounded,
+                      color: _opened.contains(i) ? Colors.white38 : kPink,
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        openWhen[i].title,
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: _opened.contains(i)
+                              ? Colors.white54
+                              : Colors.white,
+                        ),
+                      ),
+                    ),
+                    const Icon(Icons.chevron_right_rounded,
+                        color: Colors.white38),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class HeartbeatPad extends StatefulWidget {
+  const HeartbeatPad({super.key});
+  @override
+  State<HeartbeatPad> createState() => _HeartbeatPadState();
+}
+
+class _HeartbeatPadState extends State<HeartbeatPad>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 900),
+  );
+  Timer? _beat;
+  bool _held = false;
+
+  double _bump(double x, double c, double w) =>
+      exp(-pow((x - c) / w, 2).toDouble());
+
+  // lub-dub: a big pulse, then a smaller one
+  double _pulse(double t) => _bump(t, 0.1, 0.06) + 0.7 * _bump(t, 0.3, 0.06);
+
+  Future<void> _lubDub() async {
+    HapticFeedback.heavyImpact();
+    _c.forward(from: 0);
+    await Future.delayed(const Duration(milliseconds: 220));
+    if (mounted && _held) HapticFeedback.mediumImpact();
+  }
+
+  void _start() {
+    if (_held) return;
+    setState(() => _held = true);
+    _lubDub();
+    _beat = Timer.periodic(const Duration(milliseconds: 900), (_) => _lubDub());
+  }
+
+  void _stop() {
+    _beat?.cancel();
+    if (mounted) setState(() => _held = false);
+  }
+
+  @override
+  void dispose() {
+    _beat?.cancel();
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text('Put your hand here', style: script(22, color: kGold)),
+        const SizedBox(height: 4),
+        const Text(
+          'HOLD TO FEEL MY HEART',
+          style:
+              TextStyle(fontSize: 10, letterSpacing: 3, color: Colors.white54),
+        ),
+        const SizedBox(height: 28),
+        GestureDetector(
+          onTapDown: (_) => _start(),
+          onTapUp: (_) => _stop(),
+          onTapCancel: _stop,
+          child: AnimatedBuilder(
+            animation: _c,
+            builder: (_, __) => Transform.scale(
+              scale: 1 + 0.22 * _pulse(_c.value),
+              child: Icon(
+                Icons.favorite,
+                size: 110,
+                color: kPink,
+                shadows: [
+                  Shadow(
+                    color: kPink.withOpacity(_held ? 0.9 : 0.4),
+                    blurRadius: _held ? 50 : 20,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 18),
+        AnimatedOpacity(
+          opacity: _held ? 1 : 0,
+          duration: const Duration(milliseconds: 400),
+          child: Text('this is what you do to me',
+              style: script(16, color: Colors.white70)),
+        ),
+      ],
+    );
+  }
+}
+
+class MemoryStars extends StatefulWidget {
+  const MemoryStars({super.key});
+  @override
+  State<MemoryStars> createState() => _MemoryStarsState();
+}
+
+class _MemoryStarsState extends State<MemoryStars>
+    with SingleTickerProviderStateMixin {
+  static const _w = 320.0;
+  static const _h = 300.0;
+
+  late final AnimationController _tw = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 4),
+  )..repeat();
+  final Set<int> _opened = {};
+  late final List<Offset> _pos = _heart(memories.length);
+
+  // Points spread evenly along a heart curve
+  static List<Offset> _heart(int n) {
+    return List.generate(n, (i) {
+      final t = 2 * pi * i / n;
+      final x = 16 * pow(sin(t), 3).toDouble();
+      final y = 13 * cos(t) - 5 * cos(2 * t) - 2 * cos(3 * t) - cos(4 * t);
+      return Offset(160 + x * 8.6, 150 - (y + 4.5) * 8.6);
+    });
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    SharedPreferences.getInstance().then((p) {
+      if (!mounted) return;
+      setState(() {
+        for (var i = 0; i < memories.length; i++) {
+          if (p.getBool('star_$i') ?? false) _opened.add(i);
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _tw.dispose();
+    super.dispose();
+  }
+
+  void _tap(Offset p) {
+    int? best;
+    var bestD = 28.0; // tap radius in px
+    for (var i = 0; i < _pos.length; i++) {
+      final d = (_pos[i] - p).distance;
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best != null) _open(best);
+  }
+
+  Future<void> _open(int i) async {
+    HapticFeedback.mediumImpact();
+    setState(() => _opened.add(i));
+    (await SharedPreferences.getInstance()).setBool('star_$i', true);
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => Container(
+        padding: const EdgeInsets.fromLTRB(28, 30, 28, 40),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [kBgMid, kBgBottom],
+          ),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.star_rounded, color: kGold, size: 28),
+              const SizedBox(height: 10),
+              Text('Star ${i + 1}', style: script(22, color: kGold)),
+              const SizedBox(height: 20),
+              TweenAnimationBuilder<int>(
+                tween: IntTween(begin: 0, end: memories[i].length),
+                duration: Duration(milliseconds: memories[i].length * 35),
+                builder: (_, n, __) => Text(
+                  memories[i].substring(0, n),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 16, height: 1.7, color: Colors.white),
+                ),
+              ),
+              const SizedBox(height: 22),
+              const Icon(Icons.favorite, color: kPink, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final all = _opened.length == memories.length;
+    return Column(
+      children: [
+        Text('Our sky', style: script(24, color: kGold)),
+        const SizedBox(height: 6),
+        const Text('TAP EACH STAR',
+            style: TextStyle(
+                fontSize: 11, letterSpacing: 5, color: Colors.white54)),
+        const SizedBox(height: 12),
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (d) => _tap(d.localPosition),
+          child: SizedBox(
+            width: _w,
+            height: _h,
+            child: CustomPaint(painter: _StarsPainter(_pos, _opened, _tw)),
+          ),
+        ),
+        const SizedBox(height: 8),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 600),
+          child: all
+              ? Text(starsFinale,
+                  key: const ValueKey('done'),
+                  textAlign: TextAlign.center,
+                  style: script(18, color: kGold))
+              : Text('${_opened.length} / ${memories.length}',
+                  key: const ValueKey('count'),
+                  style: const TextStyle(
+                      fontSize: 12, letterSpacing: 3, color: Colors.white54)),
+        ),
+      ],
+    );
+  }
+}
+
+class _StarsPainter extends CustomPainter {
+  final List<Offset> pos;
+  final Set<int> opened;
+  final Animation<double> tw;
+  _StarsPainter(this.pos, this.opened, this.tw) : super(repaint: tw);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final n = pos.length;
+
+    // lines between lit neighbours
+    final line = Paint()
+      ..color = kGold.withOpacity(0.55)
+      ..strokeWidth = 1.4
+      ..style = PaintingStyle.stroke;
+    for (var i = 0; i < n; i++) {
+      final j = (i + 1) % n;
+      if (opened.contains(i) && opened.contains(j)) {
+        canvas.drawLine(pos[i], pos[j], line);
+      }
+    }
+
+    // stars
+    for (var i = 0; i < n; i++) {
+      final on = opened.contains(i);
+      final t = 0.5 + 0.5 * sin(2 * pi * (tw.value * 2 + i * 0.13));
+      final color = on ? kGold : Colors.white;
+      canvas.drawCircle(
+        pos[i],
+        on ? 18 : 9 + 4 * t,
+        Paint()
+          ..color = color.withOpacity(on ? 0.35 : 0.12 + 0.12 * t)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8),
+      );
+      canvas.drawCircle(
+        pos[i],
+        on ? 5.5 : 3 + 1.2 * t,
+        Paint()..color = color.withOpacity(on ? 1 : 0.6 + 0.4 * t),
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_StarsPainter old) => true;
+}
+
+class TwoCities extends StatefulWidget {
+  const TwoCities({super.key});
+  @override
+  State<TwoCities> createState() => _TwoCitiesState();
+}
+
+class _TwoCitiesState extends State<TwoCities>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 6),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final nm = nextMeeting;
+    final daysLeft = nm.difference(DateTime.now()).inDays;
+
+    return Column(
+      children: [
+        Text('Two cities, one sky', style: script(24, color: kGold)),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: 320,
+          height: 220,
+          child: AnimatedBuilder(
+            animation: _c,
+            builder: (_, __) => CustomPaint(
+              painter: _CitiesPainter(_c.value, cityYou, cityHer),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: distanceKm.toDouble()),
+          duration: const Duration(milliseconds: 2500),
+          curve: Curves.easeOutCubic,
+          builder: (_, v, __) => Text(
+            '${v.round()}',
+            style: const TextStyle(
+              fontSize: 44,
+              fontWeight: FontWeight.w600,
+              color: kGold,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+        ),
+        const Text('KM BETWEEN US',
+            style: TextStyle(
+                fontSize: 11, letterSpacing: 4, color: Colors.white54)),
+        const SizedBox(height: 14),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Text(distanceLine,
+              textAlign: TextAlign.center,
+              style: script(16, color: Colors.white70)),
+        ),
+        ...[
+          const SizedBox(height: 18),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 9),
+            decoration: glass(radius: 30),
+            child: Text(
+              daysLeft > 0
+                  ? '$daysLeft days until I see you'
+                  : 'I get to see you today',
+              style: const TextStyle(
+                  fontSize: 12, color: Colors.white70, letterSpacing: 1.2),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _CitiesPainter extends CustomPainter {
+  final double t;
+  final String a, b;
+  _CitiesPainter(this.t, this.a, this.b);
+
+  void _label(Canvas c, String text, Offset center) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text.toUpperCase(),
+        style: const TextStyle(
+            fontSize: 11, letterSpacing: 3, color: Colors.white70),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(c, Offset(center.dx - tp.width / 2, center.dy));
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final p1 = Offset(50, 165);
+    final p2 = Offset(size.width - 50, 60);
+    final path = Path()
+      ..moveTo(p1.dx, p1.dy)
+      ..quadraticBezierTo(size.width / 2, -15, p2.dx, p2.dy);
+    final metric = path.computeMetrics().first;
+
+    // faint dashed route
+    final dash = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..color = Colors.white.withOpacity(0.22);
+    for (double d = 0; d < metric.length; d += 12) {
+      canvas.drawPath(
+        metric.extractPath(d, min(d + 6, metric.length)),
+        dash,
+      );
+    }
+
+    // glowing trail behind the heart
+    final pos = metric.length * t;
+    canvas.drawPath(
+      metric.extractPath(0, pos),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.4
+        ..strokeCap = StrokeCap.round
+        ..color = kPink.withOpacity(0.8)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3),
+    );
+
+    // city dots with pulsing rings
+    for (final p in [p1, p2]) {
+      final r = (t * 3) % 1.0;
+      canvas.drawCircle(
+        p,
+        8 + 16 * r,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.4
+          ..color = kGold.withOpacity((1 - r) * 0.5),
+      );
+      canvas.drawCircle(
+        p,
+        10,
+        Paint()
+          ..color = kGold.withOpacity(0.35)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
+      );
+      canvas.drawCircle(p, 5, Paint()..color = kGold);
+    }
+
+    // travelling heart
+    final tangent = metric.getTangentForOffset(pos);
+    if (tangent != null) {
+      final hp = tangent.position;
+      canvas.drawCircle(
+        hp,
+        18,
+        Paint()
+          ..color = kPink.withOpacity(0.4)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10),
+      );
+      canvas.drawPath(heartPath(hp, 9), Paint()..color = kPink);
+    }
+
+    _label(canvas, a, Offset(p1.dx, p1.dy + 20));
+    _label(canvas, b, Offset(p2.dx, p2.dy + 20));
+  }
+
+  @override
+  bool shouldRepaint(_CitiesPainter old) => old.t != t;
 }
